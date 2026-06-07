@@ -1,0 +1,1958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Test Analytics Dashboard - Indonesian Format</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.3.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-blue: #0056b3;
+            --success-green: #28a745;
+            --danger-red: #dc3545;
+            --warning-orange: #ffc107;
+            --info-cyan: #17a2b8;
+            --secondary-gray: #6c757d;
+            --purple: #6f42c1;
+            --light-bg: #f8f9fa;
+            --dark-bg: #343a40;
+            --card-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            --hover-shadow: 0 6px 16px rgba(0,0,0,0.15);
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            box-shadow: var(--card-shadow);
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .header-left h1 {
+            margin: 0;
+            color: var(--primary-blue);
+            font-size: 28px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header-left h1 i {
+            color: var(--info-cyan);
+        }
+        
+        .header-left .subtitle {
+            color: var(--secondary-gray);
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .date-picker {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background: var(--light-bg);
+            padding: 12px 18px;
+            border-radius: 8px;
+        }
+        
+        .date-picker label {
+            font-weight: 600;
+            color: var(--dark-bg);
+        }
+        
+        .date-picker input {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .metrics-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: var(--card-shadow);
+            transition: transform 0.3s, box-shadow 0.3s;
+            border-left: 5px solid var(--primary-blue);
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--hover-shadow);
+        }
+        
+        .metric-card.passed { border-left-color: var(--success-green); }
+        .metric-card.failed { border-left-color: var(--danger-red); }
+        .metric-card.retest { border-left-color: var(--warning-orange); }
+        .metric-card.tbc { border-left-color: var(--info-cyan); }
+        .metric-card.onhold { border-left-color: var(--purple); }
+        .metric-card.na { border-left-color: var(--secondary-gray); }
+        
+        .metric-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .metric-label {
+            color: var(--secondary-gray);
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .metric-change {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #e9ecef;
+        }
+        
+        .metric-change.positive { background: #d4edda; color: var(--success-green); }
+        .metric-change.negative { background: #f8d7da; color: var(--danger-red); }
+        
+        .dashboard-content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+        
+        @media (max-width: 1100px) {
+            .dashboard-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .main-charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+        }
+        
+        @media (max-width: 900px) {
+            .main-charts {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .chart-container h2 {
+            margin-top: 0;
+            color: var(--primary-blue);
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .chart-container h2 i {
+            color: var(--info-cyan);
+        }
+        
+        .chart-box {
+            height: 300px;
+            position: relative;
+        }
+        
+        .side-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+        
+        .qa-performance, .severity-breakdown {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .qa-list {
+            margin-top: 15px;
+        }
+        
+        .qa-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .qa-name {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .qa-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--primary-blue);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .qa-stats {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .qa-stat {
+            text-align: center;
+        }
+        
+        .qa-stat-value {
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .qa-stat-label {
+            font-size: 11px;
+            color: var(--secondary-gray);
+        }
+        
+        .severity-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .severity-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            flex-grow: 1;
+            margin: 0 15px;
+            overflow: hidden;
+        }
+        
+        .severity-fill {
+            height: 100%;
+            border-radius: 4px;
+        }
+        
+        .severity-critical .severity-fill { background: var(--danger-red); }
+        .severity-major .severity-fill { background: #fd7e14; }
+        .severity-medium .severity-fill { background: var(--warning-orange); }
+        .severity-minor .severity-fill { background: var(--info-cyan); }
+        
+        .data-table-section {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--card-shadow);
+            margin-bottom: 25px;
+            overflow-x: auto;
+        }
+        
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .filters {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        select, input[type="text"] {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            background: white;
+            font-size: 14px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            min-width: 1000px;
+        }
+        
+        th {
+            background: var(--primary-blue);
+            color: white;
+            padding: 14px 12px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+        
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .status-passed { background: #d4edda; color: var(--success-green); }
+        .status-failed { background: #f8d7da; color: var(--danger-red); }
+        .status-retest { background: #fff3cd; color: #856404; }
+        .status-tbc { background: #d1ecf1; color: var(--info-cyan); }
+        .status-onhold { background: #e2d9f3; color: var(--purple); }
+        .status-na { background: #e2e3e5; color: var(--secondary-gray); }
+        
+        .severity-badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            color: white;
+            display: inline-block;
+        }
+        
+        .severity-critical { background: var(--danger-red); }
+        .severity-major { background: #fd7e14; }
+        .severity-medium { background: var(--warning-orange); }
+        .severity-minor { background: var(--info-cyan); }
+        
+        .jira-link {
+            color: var(--primary-blue);
+            text-decoration: none;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .jira-link:hover {
+            text-decoration: underline;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: var(--primary-blue);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #004494;
+        }
+        
+        .btn-success {
+            background: var(--success-green);
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #218838;
+        }
+        
+        .btn-outline {
+            background: white;
+            color: var(--primary-blue);
+            border: 1px solid var(--primary-blue);
+        }
+        
+        .btn-outline:hover {
+            background: var(--light-bg);
+        }
+        
+        .upload-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+        
+        @media (max-width: 768px) {
+            .upload-section {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .upload-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .upload-card h3 {
+            margin-top: 0;
+            color: var(--primary-blue);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        input[type="text"], input[type="date"], textarea, select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        @media (max-width: 600px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .export-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+        
+        .trend-indicator {
+            font-size: 12px;
+            margin-left: 5px;
+        }
+        
+        .trend-up { color: var(--success-green); }
+        .trend-down { color: var(--danger-red); }
+        
+        .no-data {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--secondary-gray);
+        }
+        
+        .no-data i {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 25px;
+            position: relative;
+        }
+        
+        .modal-close {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--secondary-gray);
+        }
+        
+        .detail-section {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .detail-section h4 {
+            color: var(--primary-blue);
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .detail-item {
+            margin-bottom: 8px;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: var(--secondary-gray);
+            font-size: 13px;
+        }
+        
+        .detail-value {
+            margin-top: 4px;
+            font-size: 14px;
+        }
+        
+        .test-steps {
+            background: var(--light-bg);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            white-space: pre-line;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        
+        .search-box {
+            margin-bottom: 15px;
+        }
+        
+        .search-box input {
+            width: 300px;
+            max-width: 100%;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .page-btn {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .page-btn.active {
+            background: var(--primary-blue);
+            color: white;
+            border-color: var(--primary-blue);
+        }
+        
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Dashboard Header -->
+    <div class="dashboard-header">
+        <div class="header-left">
+            <h1><i class="fas fa-chart-line"></i> Test Analytics Dashboard</h1>
+            <div class="subtitle">Comprehensive test scenario analysis with Indonesian format support</div>
+        </div>
+        <div class="date-picker">
+            <label for="startDate"><i class="fas fa-calendar-alt"></i> Start:</label>
+            <input type="date" id="startDate" value="2025-01-01">
+            <label for="endDate"><i class="fas fa-calendar-alt"></i> End:</label>
+            <input type="date" id="endDate" value="2025-12-31">
+            <button class="btn btn-outline" onclick="applyDateFilter()">
+                <i class="fas fa-filter"></i> Filter
+            </button>
+        </div>
+    </div>
+
+    <!-- Metrics Summary -->
+    <div class="metrics-summary" id="metricsSummary">
+        <!-- Dynamic metrics will be inserted here -->
+    </div>
+
+    <!-- Main Dashboard Content -->
+    <div class="dashboard-content">
+        <!-- Charts Section -->
+        <div class="main-charts">
+            <div class="chart-container">
+                <h2><i class="fas fa-chart-pie"></i> Test Status Distribution</h2>
+                <div class="chart-box">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h2><i class="fas fa-chart-bar"></i> Severity vs Status Analysis</h2>
+                <div class="chart-box">
+                    <canvas id="severityStatusChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Side Panel -->
+        <div class="side-panel">
+            <div class="qa-performance">
+                <h2><i class="fas fa-user-tie"></i> QA Performance</h2>
+                <div class="qa-list" id="qaList">
+                    <!-- QA items will be inserted here -->
+                </div>
+            </div>
+            
+            <div class="severity-breakdown">
+                <h2><i class="fas fa-exclamation-triangle"></i> Severity Breakdown</h2>
+                <div id="severityBreakdown">
+                    <!-- Severity items will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Table Section -->
+    <div class="data-table-section">
+        <div class="table-header">
+            <h2 style="margin: 0; color: var(--primary-blue);">
+                <i class="fas fa-table"></i> Test Scenarios (Total: <span id="totalScenariosCount">0</span>)
+            </h2>
+            <div class="filters">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search test cases..." onkeyup="searchTable()">
+                </div>
+                <select id="filterStatus" onchange="filterTable()">
+                    <option value="">All Statuses</option>
+                    <option value="Passed">Passed</option>
+                    <option value="Failed">Failed</option>
+                    <option value="Retest">Retest</option>
+                    <option value="On Hold">On Hold</option>
+                    <option value="TBC">TBC</option>
+                    <option value="N/A">N/A</option>
+                </select>
+                <select id="filterSeverity" onchange="filterTable()">
+                    <option value="">All Severities</option>
+                    <option value="Critical">Critical</option>
+                    <option value="Major">Major</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Minor">Minor</option>
+                </select>
+                <select id="filterQA" onchange="filterTable()">
+                    <option value="">All QA Engineers</option>
+                </select>
+                <button class="btn btn-outline" onclick="clearFilters()">
+                    <i class="fas fa-times"></i> Clear Filters
+                </button>
+            </div>
+        </div>
+        
+        <table id="testScenariosTable">
+            <thead>
+                <tr>
+                    <th>Test Case ID</th>
+                    <th>User Story</th>
+                    <th>Modul & Fitur</th>
+                    <th>Tujuan Pengujian</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>PIC QA</th>
+                    <th>Jira Ticket</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <!-- Test scenarios will be added here by JavaScript -->
+            </tbody>
+        </table>
+        
+        <div class="pagination" id="pagination">
+            <!-- Pagination will be added here -->
+        </div>
+        
+        <div class="export-actions">
+            <button class="btn btn-outline" onclick="exportToCSV()">
+                <i class="fas fa-file-csv"></i> Export CSV
+            </button>
+            <button class="btn btn-outline" onclick="exportToJSON()">
+                <i class="fas fa-file-code"></i> Export JSON
+            </button>
+            <button class="btn btn-primary" onclick="generateReport()">
+                <i class="fas fa-chart-bar"></i> Generate Full Report
+            </button>
+        </div>
+    </div>
+
+    <!-- Upload Section -->
+    <div class="upload-section">
+        <!-- Manual Upload Section -->
+        <div class="upload-card">
+            <h3><i class="fas fa-plus-circle"></i> Add Single Test Case</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="newId">Test Case ID</label>
+                    <input type="text" id="newId" placeholder="SDZ-001">
+                </div>
+                <div class="form-group">
+                    <label for="newUserStory">User Story</label>
+                    <input type="text" id="newUserStory" placeholder="Auth">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="newDescription">Tujuan Pengujian</label>
+                <input type="text" id="newDescription" placeholder="Memastikan login dengan valid credential sukses">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="newModule">Modul & Fitur</label>
+                    <select id="newModule">
+                        <option value="dashboard">Dashboard</option>
+                        <option value="auth">Authentication</option>
+                        <option value="user-management">User Management</option>
+                        <option value="payment">Payment</option>
+                        <option value="reporting">Reporting</option>
+                        <option value="others">Others</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="newSeverity">Severity</label>
+                    <select id="newSeverity">
+                        <option value="Critical">Critical</option>
+                        <option value="Major">Major</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Minor">Minor</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="newQA">PIC QA</label>
+                    <select id="newQA">
+                        <option value="badruni">Badruni</option>
+                        <option value="jane.smith">Jane Smith</option>
+                        <option value="mike.johnson">Mike Johnson</option>
+                        <option value="sarah.williams">Sarah Williams</option>
+                        <option value="robert.brown">Robert Brown</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="newJira">Jira Ticket</label>
+                    <input type="text" id="newJira" placeholder="PROJ-101">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="newCompany">Company</label>
+                    <select id="newCompany">
+                        <option value="sprint">Sprint</option>
+                        <option value="production">Production</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="newTipeTest">Tipe Test</label>
+                    <select id="newTipeTest">
+                        <option value="P">P (Production)</option>
+                        <option value="S">S (Sprint)</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn btn-success" onclick="addManualTestCase()">
+                <i class="fas fa-plus"></i> Add Test Case
+            </button>
+        </div>
+        
+        <!-- Bulk Upload Section -->
+        <div class="upload-card">
+            <h3><i class="fas fa-upload"></i> Bulk Upload (CSV Format)</h3>
+            <div class="form-group">
+                <label for="bulkCases">CSV Data - Indonesian Format</label>
+                <textarea id="bulkCases" placeholder="Test Case ID,No,User Story,Modul & Fitur,Tipe Test,Company,Divisi,Role,Tujuan Pengujian,Langkah Uji,Data Uji,Hasil yang Diharapkan,PIC QA,Status,Catatan,Status Test Production,Severity
+SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memastikan login dengan valid credential sukses,buka browser -> go to url sandeza.id -> tekan enter -> view landing page sandeza -> ketik valid username dan password --> click sign in ---> display divisi dropdown -> click ok,user : test01&#10;pass : pass123,User dengan valid credential sukses login,badruni,Passed,capture page sukses masuk ke dashboard,Passed,Major"></textarea>
+            </div>
+            <div class="form-row">
+                <button class="btn btn-primary" onclick="addBulkTestCases()">
+                    <i class="fas fa-upload"></i> Upload Bulk Cases
+                </button>
+                <button class="btn btn-outline" onclick="downloadTemplate()">
+                    <i class="fas fa-download"></i> Download Template
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="detail-modal" id="detailModal">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+        <h2>Test Case Details</h2>
+        <div id="modalContent">
+            <!-- Detail content will be inserted here -->
+        </div>
+    </div>
+</div>
+
+<script>
+    // Enhanced Test Scenarios with Indonesian format support
+    let testScenarios = [
+        { 
+            id: 'SDZ-001', 
+            description: 'Memastikan login dengan valid credential sukses', 
+            severity: 'Major', 
+            status: 'Passed', 
+            qa: 'badruni', 
+            jira: 'PROJ-101', 
+            lastUpdated: '2025-03-15',
+            metadata: {
+                no: '1',
+                userStory: 'Auth',
+                moduleFitur: 'dashboard',
+                tipeTest: 'P',
+                company: 'sprint',
+                divisi: 'development and testing',
+                role: 'clientWhatsapp',
+                tujuanPengujian: 'Memastikan login dengan valid credential sukses',
+                langkahUji: 'buka browser -> go to url sandeza.id -> tekan enter -> view landing page sandeza -> ketik valid username dan password --> click sign in ---> display divisi dropdown -> click ok',
+                dataUji: 'user : test01\npass : pass123',
+                hasilDiharapkan: 'User dengan valid credential sukses login',
+                catatan: 'capture page sukses masuk ke dashboard',
+                statusProd: 'Passed'
+            }
+        },
+        { 
+            id: 'SDZ-002', 
+            description: 'Memastikan login dengan invalid credential gagal', 
+            severity: 'Critical', 
+            status: 'Failed', 
+            qa: 'badruni', 
+            jira: 'PROJ-102', 
+            lastUpdated: '2025-03-16',
+            metadata: {
+                no: '2',
+                userStory: 'Auth',
+                moduleFitur: 'dashboard',
+                tipeTest: 'P',
+                company: 'sprint',
+                divisi: 'development and testing',
+                role: 'clientWhatsapp',
+                tujuanPengujian: 'Memastikan login dengan invalid credential gagal',
+                langkahUji: 'buka browser -> go to url sandeza.id -> tekan enter -> view landing page sandeza -> ketik invalid username dan password --> click sign in',
+                dataUji: 'user : wronguser\npass : wrongpass',
+                hasilDiharapkan: 'System menampilkan error message invalid credentials',
+                catatan: 'Terdapat bug pada error message display',
+                statusProd: 'Failed'
+            }
+        },
+        { 
+            id: 'SDZ-003', 
+            description: 'Memastikan update profile berhasil', 
+            severity: 'Minor', 
+            status: 'Passed', 
+            qa: 'jane.smith', 
+            jira: 'PROJ-103', 
+            lastUpdated: '2025-03-14',
+            metadata: {
+                no: '3',
+                userStory: 'User Management',
+                moduleFitur: 'Profile Management',
+                tipeTest: 'S',
+                company: 'production',
+                divisi: 'marketing',
+                role: 'admin',
+                tujuanPengujian: 'Memastikan update profile berhasil',
+                langkahUji: 'Login -> navigate to profile page -> click edit -> update nama -> click save',
+                dataUji: 'nama : Budi Santoso\nemail : budi.santoso@company.com',
+                hasilDiharapkan: 'Profile berhasil diupdate dengan data baru',
+                catatan: 'Update successful',
+                statusProd: 'Passed'
+            }
+        },
+        { 
+            id: 'SDZ-004', 
+            description: 'Memastikan payment gateway berfungsi', 
+            severity: 'Major', 
+            status: 'Retest', 
+            qa: 'mike.johnson', 
+            jira: 'PROJ-104', 
+            lastUpdated: '2025-03-17',
+            metadata: {
+                no: '4',
+                userStory: 'Payment',
+                moduleFitur: 'Gateway Integration',
+                tipeTest: 'P',
+                company: 'sprint',
+                divisi: 'finance',
+                role: 'finance staff',
+                tujuanPengujian: 'Memastikan payment gateway berfungsi',
+                langkahUji: 'Add item to cart -> proceed to checkout -> select payment method -> enter card details -> click pay',
+                dataUji: 'card : 4111-1111-1111-1111\nexp : 12/25\ncvv : 123',
+                hasilDiharapkan: 'Payment berhasil diproses dan order confirmed',
+                catatan: 'Need retest after gateway maintenance',
+                statusProd: 'TBC'
+            }
+        },
+        { 
+            id: 'SDZ-005', 
+            description: 'Memastikan report generation berhasil', 
+            severity: 'Medium', 
+            status: 'On Hold', 
+            qa: 'sarah.williams', 
+            jira: 'PROJ-105', 
+            lastUpdated: '2025-03-13',
+            metadata: {
+                no: '5',
+                userStory: 'Reporting',
+                moduleFitur: 'Analytics Dashboard',
+                tipeTest: 'S',
+                company: 'production',
+                divisi: 'management',
+                role: 'director',
+                tujuanPengujian: 'Memastikan report generation berhasil',
+                langkahUji: 'Login -> navigate to reports -> select date range -> click generate report -> download PDF',
+                dataUji: 'start_date : 2025-01-01\nend_date : 2025-01-31',
+                hasilDiharapkan: 'Report berhasil digenerate dalam format PDF',
+                catatan: 'Waiting for data source update',
+                statusProd: 'On Hold'
+            }
+        }
+    ];
+
+    const statuses = ['Passed', 'Failed', 'N/A', 'Retest', 'On Hold', 'TBC'];
+    const severities = ['Critical', 'Major', 'Medium', 'Minor'];
+    const qaEngineers = ['badruni', 'jane.smith', 'mike.johnson', 'sarah.williams', 'robert.brown'];
+    
+    let chartInstances = {
+        status: null,
+        severityStatus: null
+    };
+    
+    // Pagination variables
+    let currentPage = 1;
+    const itemsPerPage = 10;
+    let filteredData = [];
+
+    // Initialize dashboard
+    document.addEventListener('DOMContentLoaded', function() {
+        renderTable();
+        populateQAFilter();
+        renderMetricsSummary();
+        renderQAPerformance();
+        renderSeverityBreakdown();
+    });
+
+    // Helper function to map severity for display
+    function mapSeverityForDisplay(severity) {
+        return severity;
+    }
+
+    // Helper function to map severity for internal processing
+    function mapSeverityForProcessing(severity) {
+        const severityMap = {
+            'Critical': 'Critical',
+            'Major': 'High',
+            'Medium': 'Medium',
+            'Minor': 'Low'
+        };
+        return severityMap[severity] || severity;
+    }
+
+    // Advanced analytics algorithms
+    function calculateStatusMetrics() {
+        const counts = statuses.reduce((acc, status) => {
+            acc[status] = testScenarios.filter(s => s.status === status).length;
+            return acc;
+        }, {});
+        
+        const total = testScenarios.length;
+        const passed = counts['Passed'] || 0;
+        const failed = counts['Failed'] || 0;
+        const criticalFailed = testScenarios.filter(s => s.status === 'Failed' && s.severity === 'Critical').length;
+        
+        // Calculate percentages
+        const percentages = {};
+        statuses.forEach(status => {
+            percentages[status] = total > 0 ? ((counts[status] / total) * 100).toFixed(1) : 0;
+        });
+        
+        // Calculate pass rate
+        const passRate = total > 0 ? ((passed / (passed + failed)) * 100).toFixed(1) : 0;
+        
+        // Calculate severity distribution
+        const severityCounts = severities.reduce((acc, severity) => {
+            acc[severity] = testScenarios.filter(s => s.severity === severity).length;
+            return acc;
+        }, {});
+        
+        // Calculate QA performance
+        const qaPerformance = qaEngineers.map(qa => {
+            const qaTests = testScenarios.filter(s => s.qa === qa);
+            const qaPassed = qaTests.filter(s => s.status === 'Passed').length;
+            const qaTotal = qaTests.length;
+            const passRate = qaTotal > 0 ? ((qaPassed / qaTotal) * 100).toFixed(1) : 0;
+            
+            return {
+                name: qa,
+                total: qaTotal,
+                passed: qaPassed,
+                passRate: passRate,
+                failed: qaTests.filter(s => s.status === 'Failed').length,
+                critical: qaTests.filter(s => s.severity === 'Critical').length
+            };
+        }).sort((a, b) => b.passRate - a.passRate);
+        
+        return {
+            counts,
+            total,
+            percentages,
+            passRate,
+            criticalFailed,
+            severityCounts,
+            qaPerformance
+        };
+    }
+
+    function renderMetricsSummary() {
+        const metrics = calculateStatusMetrics();
+        const metricsHTML = `
+            <div class="metric-card passed">
+                <div class="metric-label">
+                    <span>Passed</span>
+                    <span class="metric-change positive">+2% <i class="fas fa-arrow-up"></i></span>
+                </div>
+                <div class="metric-value">${metrics.counts['Passed'] || 0}</div>
+                <div>${metrics.percentages['Passed'] || 0}% of total</div>
+            </div>
+            <div class="metric-card failed">
+                <div class="metric-label">
+                    <span>Failed</span>
+                    <span class="metric-change negative">-1% <i class="fas fa-arrow-down"></i></span>
+                </div>
+                <div class="metric-value">${metrics.counts['Failed'] || 0}</div>
+                <div>${metrics.percentages['Failed'] || 0}% of total</div>
+            </div>
+            <div class="metric-card retest">
+                <div class="metric-label">
+                    <span>Retest Required</span>
+                </div>
+                <div class="metric-value">${metrics.counts['Retest'] || 0}</div>
+                <div>${metrics.percentages['Retest'] || 0}% of total</div>
+            </div>
+            <div class="metric-card onhold">
+                <div class="metric-label">
+                    <span>On Hold</span>
+                </div>
+                <div class="metric-value">${metrics.counts['On Hold'] || 0}</div>
+                <div>${metrics.percentages['On Hold'] || 0}% of total</div>
+            </div>
+            <div class="metric-card tbc">
+                <div class="metric-label">
+                    <span>To Be Confirmed</span>
+                </div>
+                <div class="metric-value">${metrics.counts['TBC'] || 0}</div>
+                <div>${metrics.percentages['TBC'] || 0}% of total</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">
+                    <span>Pass Rate</span>
+                    <span class="metric-change positive">+3% <i class="fas fa-arrow-up"></i></span>
+                </div>
+                <div class="metric-value">${metrics.passRate}%</div>
+                <div>Overall success rate</div>
+            </div>
+        `;
+        
+        document.getElementById('metricsSummary').innerHTML = metricsHTML;
+    }
+
+    function renderQAPerformance() {
+        const metrics = calculateStatusMetrics();
+        const qaHTML = metrics.qaPerformance.map(qa => `
+            <div class="qa-item">
+                <div class="qa-name">
+                    <div class="qa-avatar">${qa.name.charAt(0).toUpperCase()}</div>
+                    <div>
+                        <strong>${qa.name}</strong><br>
+                        <small>${qa.total} tests assigned</small>
+                    </div>
+                </div>
+                <div class="qa-stats">
+                    <div class="qa-stat">
+                        <div class="qa-stat-value" style="color: #28a745;">${qa.passRate}%</div>
+                        <div class="qa-stat-label">Pass Rate</div>
+                    </div>
+                    <div class="qa-stat">
+                        <div class="qa-stat-value">${qa.passed}/${qa.total}</div>
+                        <div class="qa-stat-label">Passed</div>
+                    </div>
+                    <div class="qa-stat">
+                        <div class="qa-stat-value" style="color: #dc3545;">${qa.critical}</div>
+                        <div class="qa-stat-label">Critical</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        
+        document.getElementById('qaList').innerHTML = qaHTML;
+    }
+
+    function renderSeverityBreakdown() {
+        const metrics = calculateStatusMetrics();
+        const total = metrics.total;
+        
+        const severityHTML = severities.map(severity => {
+            const count = metrics.severityCounts[severity] || 0;
+            const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+            
+            return `
+                <div class="severity-item severity-${severity.toLowerCase()}">
+                    <span>${severity}</span>
+                    <div class="severity-bar">
+                        <div class="severity-fill" style="width: ${percentage}%"></div>
+                    </div>
+                    <span><strong>${count}</strong> (${percentage}%)</span>
+                </div>
+            `;
+        }).join('');
+        
+        document.getElementById('severityBreakdown').innerHTML = severityHTML;
+    }
+
+    function renderTable() {
+        filteredData = [...testScenarios];
+        renderTablePage();
+        updatePagination();
+        updateCharts();
+    }
+
+    function renderTablePage() {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+        
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const pageData = filteredData.slice(startIndex, endIndex);
+        
+        if (pageData.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="no-data">
+                        <i class="fas fa-search"></i>
+                        <p>No test cases found</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        pageData.forEach(scenario => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${scenario.id}</strong></td>
+                <td>${scenario.metadata?.userStory || 'N/A'}</td>
+                <td>${scenario.metadata?.moduleFitur || 'N/A'}</td>
+                <td>${scenario.description}</td>
+                <td>
+                    <span class="severity-badge severity-${scenario.severity.toLowerCase()}">
+                        ${scenario.severity}
+                    </span>
+                </td>
+                <td>
+                    <span class="status-badge status-${scenario.status.toLowerCase().replace(/\s/g, '')}">
+                        ${scenario.status}
+                    </span>
+                </td>
+                <td>${scenario.qa}</td>
+                <td>
+                    <a href="https://jira.example.com/browse/${scenario.jira}" 
+                       target="_blank" class="jira-link">
+                        <i class="fab fa-jira"></i> ${scenario.jira}
+                    </a>
+                </td>
+                <td>
+                    <div class="action-buttons">
+                        <button class="btn btn-outline" onclick="showDetail('${scenario.id}')" title="View Details">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="btn btn-outline" onclick="editRow('${scenario.id}')" title="Edit">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-outline" onclick="deleteRow('${scenario.id}')" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+        
+        document.getElementById('totalScenariosCount').textContent = filteredData.length;
+    }
+
+    function updatePagination() {
+        const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+        const pagination = document.getElementById('pagination');
+        
+        if (totalPages <= 1) {
+            pagination.innerHTML = '';
+            return;
+        }
+        
+        let paginationHTML = `
+            <button class="page-btn" onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-chevron-left"></i>
+            </button>
+        `;
+        
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+                paginationHTML += `
+                    <button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">
+                        ${i}
+                    </button>
+                `;
+            } else if (i === currentPage - 2 || i === currentPage + 2) {
+                paginationHTML += `<span>...</span>`;
+            }
+        }
+        
+        paginationHTML += `
+            <button class="page-btn" onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        `;
+        
+        pagination.innerHTML = paginationHTML;
+    }
+
+    function changePage(page) {
+        const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+        if (page >= 1 && page <= totalPages) {
+            currentPage = page;
+            renderTablePage();
+        }
+    }
+
+    function updateCharts() {
+        const metrics = calculateStatusMetrics();
+        
+        // Status Distribution Chart
+        const statusCtx = document.getElementById('statusChart').getContext('2d');
+        if (chartInstances.status) {
+            chartInstances.status.destroy();
+        }
+        
+        const statusColors = {
+            'Passed': '#28a745',
+            'Failed': '#dc3545',
+            'N/A': '#6c757d',
+            'Retest': '#ffc107',
+            'On Hold': '#6f42c1',
+            'TBC': '#17a2b8'
+        };
+        
+        chartInstances.status = new Chart(statusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: statuses,
+                datasets: [{
+                    data: statuses.map(status => metrics.counts[status] || 0),
+                    backgroundColor: statuses.map(status => statusColors[status]),
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { 
+                        position: 'right',
+                        labels: { padding: 20 }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label;
+                                const value = context.raw;
+                                const percentage = ((value / metrics.total) * 100).toFixed(1);
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                },
+                cutout: '65%'
+            }
+        });
+        
+        // Severity vs Status Chart
+        const severityStatusCtx = document.getElementById('severityStatusChart').getContext('2d');
+        if (chartInstances.severityStatus) {
+            chartInstances.severityStatus.destroy();
+        }
+        
+        // Prepare data for stacked bar chart
+        const severityStatusData = severities.map(severity => {
+            return statuses.map(status => {
+                return testScenarios.filter(s => s.severity === severity && s.status === status).length;
+            });
+        });
+        
+        chartInstances.severityStatus = new Chart(severityStatusCtx, {
+            type: 'bar',
+            data: {
+                labels: severities,
+                datasets: statuses.map((status, index) => ({
+                    label: status,
+                    data: severityStatusData.map(row => row[index]),
+                    backgroundColor: statusColors[status],
+                    stack: 'Stack 0'
+                }))
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top' },
+                    title: {
+                        display: true,
+                        text: 'Test Distribution by Severity and Status'
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        stacked: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Tests'
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Enhanced functionality
+    function addManualTestCase() {
+        const id = document.getElementById('newId').value;
+        const userStory = document.getElementById('newUserStory').value;
+        const description = document.getElementById('newDescription').value;
+        const moduleFitur = document.getElementById('newModule').value;
+        const severity = document.getElementById('newSeverity').value;
+        const qa = document.getElementById('newQA').value;
+        const jira = document.getElementById('newJira').value;
+        const company = document.getElementById('newCompany').value;
+        const tipeTest = document.getElementById('newTipeTest').value;
+        
+        if (id && description && qa && jira) {
+            testScenarios.push({ 
+                id, 
+                description, 
+                severity, 
+                status: 'TBC', 
+                qa, 
+                jira,
+                lastUpdated: new Date().toISOString().split('T')[0],
+                metadata: {
+                    no: (testScenarios.length + 1).toString(),
+                    userStory: userStory,
+                    moduleFitur: moduleFitur,
+                    tipeTest: tipeTest,
+                    company: company,
+                    divisi: 'development and testing',
+                    role: 'clientWhatsapp',
+                    tujuanPengujian: description,
+                    langkahUji: 'To be defined',
+                    dataUji: 'To be defined',
+                    hasilDiharapkan: 'Test passed successfully',
+                    catatan: 'Added manually via dashboard',
+                    statusProd: 'TBC'
+                }
+            });
+            
+            renderTable();
+            renderMetricsSummary();
+            renderQAPerformance();
+            renderSeverityBreakdown();
+            
+            // Clear inputs
+            document.getElementById('newId').value = '';
+            document.getElementById('newUserStory').value = '';
+            document.getElementById('newDescription').value = '';
+            document.getElementById('newJira').value = '';
+            
+            alert('Test case added successfully!');
+        } else {
+            alert('Please fill in all required fields.');
+        }
+    }
+
+    function addBulkTestCases() {
+        const bulkInput = document.getElementById('bulkCases').value;
+        const lines = bulkInput.trim().split('\n');
+        let addedCount = 0;
+        
+        // Check if first line contains headers
+        const firstLine = lines[0];
+        const hasHeaders = firstLine.includes('Test Case ID') && firstLine.includes('PIC QA');
+        
+        lines.forEach((line, index) => {
+            // Skip header row
+            if (index === 0 && hasHeaders) return;
+            
+            // Handle multi-line values (like dataUji with line breaks)
+            const parts = [];
+            let currentPart = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    parts.push(currentPart);
+                    currentPart = '';
+                } else {
+                    currentPart += char;
+                }
+            }
+            parts.push(currentPart);
+            
+            if (parts.length >= 17) {
+                const [
+                    testCaseId, no, userStory, moduleFitur, tipeTest, company, 
+                    divisi, role, tujuanPengujian, langkahUji, dataUji, 
+                    hasilDiharapkan, picQA, status, catatan, statusProd, severity
+                ] = parts.map(p => p.trim().replace(/^"|"$/g, ''));
+                
+                if (testCaseId && picQA) {
+                    // Convert to our internal format
+                    testScenarios.push({ 
+                        id: testCaseId,
+                        description: tujuanPengujian,
+                        severity: severity,
+                        status: status,
+                        qa: picQA,
+                        jira: testCaseId.replace('SDZ-', 'PROJ-'),
+                        lastUpdated: new Date().toISOString().split('T')[0],
+                        metadata: {
+                            no: no,
+                            userStory: userStory,
+                            moduleFitur: moduleFitur,
+                            tipeTest: tipeTest,
+                            company: company,
+                            divisi: divisi,
+                            role: role,
+                            tujuanPengujian: tujuanPengujian,
+                            langkahUji: langkahUji,
+                            dataUji: dataUji.replace(/\\n/g, '\n'),
+                            hasilDiharapkan: hasilDiharapkan,
+                            catatan: catatan,
+                            statusProd: statusProd
+                        }
+                    });
+                    addedCount++;
+                }
+            }
+        });
+        
+        if (addedCount > 0) {
+            renderTable();
+            renderMetricsSummary();
+            renderQAPerformance();
+            renderSeverityBreakdown();
+            alert(`Successfully added ${addedCount} test cases.`);
+        } else {
+            alert('No valid test cases were added. Please check the format.');
+        }
+        
+        document.getElementById('bulkCases').value = '';
+    }
+
+    function updateStatus(id, newStatus) {
+        const scenario = testScenarios.find(s => s.id === id);
+        if (scenario) {
+            scenario.status = newStatus;
+            scenario.lastUpdated = new Date().toISOString().split('T')[0];
+            renderTable();
+            renderMetricsSummary();
+            renderQAPerformance();
+        }
+    }
+
+    function updateQA(id, newQA) {
+        const scenario = testScenarios.find(s => s.id === id);
+        if (scenario) {
+            scenario.qa = newQA;
+            scenario.lastUpdated = new Date().toISOString().split('T')[0];
+            renderTable();
+            renderQAPerformance();
+        }
+    }
+
+    function showDetail(id) {
+        const scenario = testScenarios.find(s => s.id === id);
+        if (!scenario) return;
+        
+        const modalContent = document.getElementById('modalContent');
+        const metadata = scenario.metadata || {};
+        
+        modalContent.innerHTML = `
+            <div class="detail-grid">
+                <div class="detail-section">
+                    <h4>Basic Information</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-label">Test Case ID</div>
+                            <div class="detail-value">${scenario.id}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">No</div>
+                            <div class="detail-value">${metadata.no || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">User Story</div>
+                            <div class="detail-value">${metadata.userStory || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Modul & Fitur</div>
+                            <div class="detail-value">${metadata.moduleFitur || 'N/A'}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="detail-section">
+                    <h4>Test Details</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-label">Tipe Test</div>
+                            <div class="detail-value">${metadata.tipeTest || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Company</div>
+                            <div class="detail-value">${metadata.company || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Divisi</div>
+                            <div class="detail-value">${metadata.divisi || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Role</div>
+                            <div class="detail-value">${metadata.role || 'N/A'}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="detail-section">
+                    <h4>Test Execution</h4>
+                    <div class="detail-item">
+                        <div class="detail-label">Tujuan Pengujian</div>
+                        <div class="detail-value">${scenario.description}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Langkah Uji</div>
+                        <div class="test-steps">${metadata.langkahUji || 'N/A'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Data Uji</div>
+                        <div class="test-steps">${metadata.dataUji || 'N/A'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Hasil yang Diharapkan</div>
+                        <div class="detail-value">${metadata.hasilDiharapkan || 'N/A'}</div>
+                    </div>
+                </div>
+                
+                <div class="detail-section">
+                    <h4>Status & Assignment</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-label">PIC QA</div>
+                            <div class="detail-value">${scenario.qa}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Status</div>
+                            <div class="detail-value">
+                                <span class="status-badge status-${scenario.status.toLowerCase().replace(/\s/g, '')}">
+                                    ${scenario.status}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Severity</div>
+                            <div class="detail-value">
+                                <span class="severity-badge severity-${scenario.severity.toLowerCase()}">
+                                    ${scenario.severity}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Status Test Production</div>
+                            <div class="detail-value">${metadata.statusProd || 'N/A'}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="detail-section">
+                    <h4>Additional Information</h4>
+                    <div class="detail-item">
+                        <div class="detail-label">Jira Ticket</div>
+                        <div class="detail-value">
+                            <a href="https://jira.example.com/browse/${scenario.jira}" target="_blank" class="jira-link">
+                                <i class="fab fa-jira"></i> ${scenario.jira}
+                            </a>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Catatan</div>
+                        <div class="detail-value">${metadata.catatan || 'No notes'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Last Updated</div>
+                        <div class="detail-value">${scenario.lastUpdated}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('detailModal').style.display = 'flex';
+    }
+
+    function closeDetailModal() {
+        document.getElementById('detailModal').style.display = 'none';
+    }
+
+    function editRow(id) {
+        // In a real application, you would open an edit form
+        alert(`Edit functionality for ${id} would open an edit form.`);
+        // For now, we'll just show the detail modal
+        showDetail(id);
+    }
+
+    function deleteRow(id) {
+        if (confirm('Are you sure you want to delete this test case?')) {
+            testScenarios = testScenarios.filter(s => s.id !== id);
+            renderTable();
+            renderMetricsSummary();
+            renderQAPerformance();
+            renderSeverityBreakdown();
+        }
+    }
+
+    function filterTable() {
+        const statusFilter = document.getElementById('filterStatus').value;
+        const severityFilter = document.getElementById('filterSeverity').value;
+        const qaFilter = document.getElementById('filterQA').value;
+        const searchText = document.getElementById('searchInput').value.toLowerCase();
+        
+        filteredData = testScenarios.filter(scenario => {
+            const matchesStatus = !statusFilter || scenario.status === statusFilter;
+            const matchesSeverity = !severityFilter || scenario.severity === severityFilter;
+            const matchesQA = !qaFilter || scenario.qa === qaFilter;
+            const matchesSearch = !searchText || 
+                scenario.id.toLowerCase().includes(searchText) ||
+                scenario.description.toLowerCase().includes(searchText) ||
+                scenario.qa.toLowerCase().includes(searchText) ||
+                scenario.jira.toLowerCase().includes(searchText) ||
+                (scenario.metadata?.userStory && scenario.metadata.userStory.toLowerCase().includes(searchText));
+            
+            return matchesStatus && matchesSeverity && matchesQA && matchesSearch;
+        });
+        
+        currentPage = 1;
+        renderTablePage();
+        updatePagination();
+    }
+
+    function searchTable() {
+        filterTable();
+    }
+
+    function clearFilters() {
+        document.getElementById('filterStatus').value = '';
+        document.getElementById('filterSeverity').value = '';
+        document.getElementById('filterQA').value = '';
+        document.getElementById('searchInput').value = '';
+        renderTable();
+    }
+
+    function populateQAFilter() {
+        const qaFilter = document.getElementById('filterQA');
+        qaEngineers.forEach(qa => {
+            const option = document.createElement('option');
+            option.value = qa;
+            option.textContent = qa;
+            qaFilter.appendChild(option);
+        });
+    }
+
+    function applyDateFilter() {
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        
+        // Filter logic based on dates
+        alert(`Filter applied for dates: ${startDate} to ${endDate}`);
+        // Implement actual date filtering here
+    }
+
+    function exportToCSV() {
+        let csvContent = "Test Case ID,No,User Story,Modul & Fitur,Tipe Test,Company,Divisi,Role,Tujuan Pengujian,Langkah Uji,Data Uji,Hasil yang Diharapkan,PIC QA,Status,Catatan,Status Test Production,Severity,Last Updated,Jira Ticket\n";
+        
+        testScenarios.forEach((scenario, index) => {
+            const metadata = scenario.metadata || {};
+            csvContent += `"${scenario.id}","${metadata.no || (index + 1)}","${metadata.userStory || 'General'}","${metadata.moduleFitur || 'General'}","${metadata.tipeTest || 'P'}","${metadata.company || 'sprint'}","${metadata.divisi || 'development and testing'}","${metadata.role || 'clientWhatsapp'}","${metadata.tujuanPengujian || scenario.description}","${metadata.langkahUji || 'To be defined'}","${(metadata.dataUji || 'To be defined').replace(/\n/g, '\\n')}","${metadata.hasilDiharapkan || 'Test passed successfully'}","${scenario.qa}","${scenario.status}","${metadata.catatan || ''}","${metadata.statusProd || scenario.status}","${scenario.severity}","${scenario.lastUpdated}","${scenario.jira}"\n`;
+        });
+        
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'test_scenarios_detailed_export.csv';
+        a.click();
+    }
+
+    function exportToJSON() {
+        const dataStr = JSON.stringify(testScenarios, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'test_scenarios_export.json';
+        a.click();
+    }
+
+    function generateReport() {
+        const metrics = calculateStatusMetrics();
+        
+        const reportWindow = window.open('', '_blank');
+        reportWindow.document.write(`
+            <html>
+                <head>
+                    <title>Test Analytics Report - ${new Date().toLocaleDateString()}</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 40px; }
+                        h1 { color: #0056b3; }
+                        .metric { margin: 20px 0; }
+                        .chart-container { width: 600px; height: 400px; margin: 20px 0; }
+                        .report-section { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #eee; }
+                        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+                        th { background: #f8f9fa; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Test Analytics Report</h1>
+                    <p>Generated on: ${new Date().toLocaleString()}</p>
+                    <p>Total Test Cases: ${testScenarios.length}</p>
+                    
+                    <div class="report-section">
+                        <h2>Executive Summary</h2>
+                        <p><strong>Overall Pass Rate:</strong> ${metrics.passRate}%</p>
+                        <p><strong>Critical Failures:</strong> ${metrics.criticalFailed}</p>
+                        <p><strong>Tests Requiring Retest:</strong> ${metrics.counts['Retest'] || 0}</p>
+                        <p><strong>Tests On Hold:</strong> ${metrics.counts['On Hold'] || 0}</p>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h2>Status Distribution</h2>
+                        <table>
+                            <tr>
+                                <th>Status</th>
+                                <th>Count</th>
+                                <th>Percentage</th>
+                            </tr>
+                            ${statuses.map(status => `
+                                <tr>
+                                    <td>${status}</td>
+                                    <td>${metrics.counts[status] || 0}</td>
+                                    <td>${metrics.percentages[status] || 0}%</td>
+                                </tr>
+                            `).join('')}
+                        </table>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h2>QA Performance</h2>
+                        <table>
+                            <tr>
+                                <th>QA Engineer</th>
+                                <th>Total Tests</th>
+                                <th>Passed</th>
+                                <th>Pass Rate</th>
+                                <th>Critical Issues</th>
+                            </tr>
+                            ${metrics.qaPerformance.map(qa => `
+                                <tr>
+                                    <td>${qa.name}</td>
+                                    <td>${qa.total}</td>
+                                    <td>${qa.passed}</td>
+                                    <td>${qa.passRate}%</td>
+                                    <td>${qa.critical}</td>
+                                </tr>
+                            `).join('')}
+                        </table>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h2>Severity Analysis</h2>
+                        <table>
+                            <tr>
+                                <th>Severity</th>
+                                <th>Count</th>
+                                <th>Percentage</th>
+                            </tr>
+                            ${severities.map(severity => {
+                                const count = metrics.severityCounts[severity] || 0;
+                                const percentage = metrics.total > 0 ? ((count / metrics.total) * 100).toFixed(1) : 0;
+                                return `
+                                    <tr>
+                                        <td>${severity}</td>
+                                        <td>${count}</td>
+                                        <td>${percentage}%</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </table>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h2>Recommendations</h2>
+                        <ul>
+                            <li>Address ${metrics.criticalFailed} critical failures immediately</li>
+                            <li>Focus on improving pass rate for ${metrics.qaPerformance[metrics.qaPerformance.length-1]?.name || 'lowest performer'}</li>
+                            <li>Review ${metrics.counts['Retest']} tests requiring retest</li>
+                            <li>Follow up on ${metrics.counts['On Hold']} tests that are on hold</li>
+                            <li>Ensure all test cases have proper documentation and steps</li>
+                        </ul>
+                    </div>
+                </body>
+            </html>
+        `);
+        reportWindow.document.close();
+    }
+
+    function downloadTemplate() {
+        const template = `Test Case ID,No,User Story,Modul & Fitur,Tipe Test,Company,Divisi,Role,Tujuan Pengujian,Langkah Uji,Data Uji,Hasil yang Diharapkan,PIC QA,Status,Catatan,Status Test Production,Severity
+SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memastikan login dengan valid credential sukses,buka browser -> go to url sandeza.id -> tekan enter -> view landing page sandeza -> ketik valid username dan password --> click sign in ---> display divisi dropdown -> click ok,"user : test01
+pass : pass123",User dengan valid credential sukses login,badruni,Passed,capture page sukses masuk ke dashboard,Passed,Major
+SDZ-002,2,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memastikan login dengan invalid credential gagal,buka browser -> go to url sandeza.id -> tekan enter -> view landing page sandeza -> ketik invalid username dan password --> click sign in,"user : wronguser
+pass : wrongpass",System menampilkan error message invalid credentials,badruni,Failed,Terdapat bug pada error message display,Failed,Critical
+SDZ-003,3,User Management,Profile Management,S,production,marketing,admin,Memastikan update profile berhasil,Login -> navigate to profile page -> click edit -> update nama -> click save,"nama : Budi Santoso
+email : budi.santoso@company.com",Profile berhasil diupdate dengan data baru,jane.smith,Passed,Update successful,Passed,Minor`;
+        
+        const blob = new Blob([template], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'test_case_template_indonesian_format.csv';
+        a.click();
+    }
+
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+        const modal = document.getElementById('detailModal');
+        if (event.target === modal) {
+            closeDetailModal();
+        }
+    };
+
+    // Close modal with ESC key
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            closeDetailModal();
+        }
+    });
+</script>
+
+</body>
+</html>
