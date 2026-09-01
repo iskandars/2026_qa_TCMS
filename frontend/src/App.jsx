@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -62,6 +63,10 @@ function hasPerm(permissions, perm) {
 }
 
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [theme, setTheme] = useState(() => localStorage.getItem('tcmsTheme') || 'light');
   const [token, setToken] = useState(localStorage.getItem('tcmsToken') || '');
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('tcmsUser') || 'null'); }
@@ -77,6 +82,36 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('tcmsTheme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  useEffect(() => {
+    const path = location.pathname.replace(/^\//, '');
+    if (!token || !user) {
+      if (location.pathname !== '/login') {
+        navigate('/login', { replace: true });
+      }
+    } else {
+      if (location.pathname === '/' || location.pathname === '/login') {
+        navigate('/overview', { replace: true });
+      } else if (navItems.includes(path) && path !== activeTab) {
+        setActiveTab(path);
+      }
+    }
+  }, [location.pathname, token, user, navigate]);
+
+  const handleTabClick = (item) => {
+    setActiveTab(item);
+    navigate(`/${item}`);
+  };
+
 
   const [data, setData] = useState({
     projects: [], users: [], testCases: [], requirements: [], cycles: [], testRuns: [],
@@ -1790,6 +1825,11 @@ export default function App() {
   if (!token || !user) {
     return (
       <div className="auth-shell">
+        <div style={{ position: 'absolute', top: '20px', right: '20px' }}>
+          <button type="button" className="theme-toggle-btn" onClick={toggleTheme}>
+            {theme === 'light' ? '🌙 Dark Mode' : '☀️ Light Mode'}
+          </button>
+        </div>
         <div className="login-panel">
           <div className="brand-block">
             <span className="eyebrow">Bank Ina Digital QA Suite</span>
@@ -1842,7 +1882,7 @@ export default function App() {
         <nav className="nav-menu">
           <span className="nav-label">Workflow</span>
           {navItems.map((item) => (
-            <button key={item} type="button" className={activeTab === item ? 'nav-item active' : 'nav-item'} onClick={() => setActiveTab(item)}>
+            <button key={item} type="button" className={activeTab === item ? 'nav-item active' : 'nav-item'} onClick={() => handleTabClick(item)}>
               {item.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())}
             </button>
           ))}
@@ -1866,6 +1906,9 @@ export default function App() {
             <h2>Bank Ina Digital Test Management Console</h2>
           </div>
           <div className="topbar-actions">
+            <button type="button" className="theme-toggle-btn" onClick={toggleTheme}>
+              {theme === 'light' ? '🌙 Dark Mode' : '☀️ Light Mode'}
+            </button>
             <span className="badge" style={{ backgroundColor: roleMeta[userRole]?.color || '#1e3a8a' }}>
               {roleMeta[userRole]?.label || 'User'}
             </span>
@@ -1876,6 +1919,7 @@ export default function App() {
             )}
           </div>
         </header>
+
 
         {loading ? <div className="loading-box">Loading QA workspace...</div> : null}
         {error ? <div className="error-box">{error}</div> : null}
