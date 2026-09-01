@@ -1,0 +1,14 @@
+{
+  "name": "tcms-platform",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down -v",
+    "test:e2e": "npm run test:e2e --prefix frontend"
+  }
+}
