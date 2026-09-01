@@ -7,11 +7,11 @@ import autoTable from 'jspdf-autotable';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 const roleMeta = {
-  qa_lead: { label: 'QA Lead', color: '#1e3a8a' },
-  qa_engineer: { label: 'QA Engineer', color: '#2563eb' },
-  product: { label: 'Product', color: '#0ea5e9' },
-  pm: { label: 'PM', color: '#1e40af' },
-  business_analyst: { label: 'Business Analyst', color: '#0891b2' },
+  qa_lead: { label: 'QA Lead', color: '#7f1d1d' },
+  qa_engineer: { label: 'QA Engineer', color: '#b91c1c' },
+  product: { label: 'Product', color: '#991b1b' },
+  pm: { label: 'PM', color: '#dc2626' },
+  business_analyst: { label: 'Business Analyst', color: '#1e3a8a' },
 };
 
 const initialCredentials = {

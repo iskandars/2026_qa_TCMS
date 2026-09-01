@@ -172,5 +172,72 @@ export async function initializeDatabase() {
     );
   `);
 
+  const tcColumns = [
+    ['modul_fitur', 'VARCHAR(500)'],
+    ['user_story_coverage', 'TEXT'],
+    ['tipe_test', 'VARCHAR(200)'],
+    ['user_role', 'VARCHAR(200)'],
+    ['tujuan_pengujian', 'TEXT'],
+    ['langkah_uji', 'TEXT'],
+    ['validasi_data_uji', 'TEXT'],
+    ['hasil_yang_diharapkan', 'TEXT'],
+    ['pic_qa', 'VARCHAR(255)'],
+    ['status_sit', 'VARCHAR(100)'],
+    ['date_sit_executed', 'DATE'],
+    ['date_sit_done', 'DATE'],
+    ['object_test_version', 'VARCHAR(100)'],
+    ['api_version', 'VARCHAR(100)'],
+    ['test_scenario_version', 'VARCHAR(100)'],
+    ['requirement_id', 'INTEGER REFERENCES requirements(id)'],
+  ];
+  for (const [col, type] of tcColumns) {
+    try {
+      await pool.query(`ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) { /* ignore race */ }
+  }
+
+  const trColumns = [
+    ['estimated_minutes', 'INTEGER'],
+    ['actual_minutes', 'INTEGER'],
+  ];
+  for (const [col, type] of trColumns) {
+    try {
+      await pool.query(`ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+  const cyColumns = [
+    ['estimated_minutes', 'INTEGER'],
+    ['actual_minutes', 'INTEGER'],
+  ];
+  for (const [col, type] of cyColumns) {
+    try {
+      await pool.query(`ALTER TABLE test_cycles ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+
+  const defectColumns = [
+    ['priority', 'VARCHAR(50) DEFAULT \'Medium\''],
+    ['reporter_id', 'INTEGER REFERENCES users(id)'],
+    ['linked_cycle_id', 'INTEGER REFERENCES test_cycles(id)'],
+    ['linked_run_id', 'INTEGER REFERENCES test_runs(id)'],
+    ['environment', 'VARCHAR(200)'],
+    ['steps_to_reproduce', 'TEXT'],
+  ];
+  for (const [col, type] of defectColumns) {
+    try {
+      await pool.query(`ALTER TABLE defects ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+
+  const reqColumns = [
+    ['user_story', 'TEXT'],
+    ['acceptance_criteria', 'TEXT'],
+  ];
+  for (const [col, type] of reqColumns) {
+    try {
+      await pool.query(`ALTER TABLE requirements ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+
   await seedDatabase(pool);
 }
