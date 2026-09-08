@@ -239,5 +239,15 @@ export async function initializeDatabase() {
     } catch (_e) {}
   }
 
+  const reqDocColumns = [
+    ['markdown_content', 'TEXT'],
+    ['markdown_file_path', 'VARCHAR(1000)'],
+  ];
+  for (const [col, type] of reqDocColumns) {
+    try {
+      await pool.query(`ALTER TABLE requirement_documents ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+
   await seedDatabase(pool);
 }

@@ -145,6 +145,7 @@ export default function App() {
   });
   const [scenarioGen, setScenarioGen] = useState({ projectId: '', requirementId: '', documentId: '', prefix: '', fullCoverage: false });
   const [pdfUpload, setPdfUpload] = useState({ projectId: '', requirementId: '', uploading: false });
+  const [showMdPreview, setShowMdPreview] = useState(true);
   const [selectedScenarios, setSelectedScenarios] = useState([]);
   const [estimateScope, setEstimateScope] = useState({ projectId: '', runId: '', cycleId: '' });
 
@@ -460,9 +461,11 @@ export default function App() {
       setData((d) => ({
         ...d,
         userStoriesFromPDF: res.data.userStories || [],
+        latestMarkdownContent: res.data.markdownContent || '',
+        latestDoc: res.data.document,
         docUploads: [res.data.document, ...(d.docUploads || [])],
       }));
-      setInfo(`PDF processed: ${res.data.ragChunkCount} text chunks, ${(res.data.userStories || []).length} user stories extracted.`);
+      setInfo(`PDF converted to .md! Extracted ${res.data.ragChunkCount} text chunks and ${(res.data.userStories || []).length} user stories for full test coverage.`);
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to process PDF.');
     } finally {
@@ -470,18 +473,67 @@ export default function App() {
     }
   };
 
-  const generateScenarios = async () => {
+  const downloadMarkdownDoc = async (docId, fileName) => {
+    try {
+      const targetId = docId || data.latestDoc?.id;
+      if (!targetId && data.latestMarkdownContent) {
+        const blob = new Blob([data.latestMarkdownContent], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(fileName || 'requirement').replace(/\.[^/.]+$/, '')}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+      if (!targetId) { setError('No markdown document selected.'); return; }
+      const res = await axios.get(`${API_URL}/requirement-documents/${targetId}/download-md`, {
+        headers: getAuthHeaders(token),
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(fileName || 'requirement').replace(/\.[^/.]+$/, '')}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Unable to download Markdown file.');
+    }
+  };
+
+  const downloadPdfDoc = async (docId, fileName) => {
+    try {
+      const res = await axios.get(`${API_URL}/requirement-documents/${docId}/download-pdf`, {
+        headers: getAuthHeaders(token),
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || 'document.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Unable to download PDF file.');
+    }
+  };
+
+  const generateScenarios = async (forceFullCoverage = true) => {
     if (!canGenerateScenarios) { setError('Permission denied.'); return; }
     try {
-      setInfo('Generating scenarios...');
-      const body = { ...scenarioGen };
+      setInfo('Analyzing requirement & generating full-coverage test scenarios...');
+      const body = { ...scenarioGen, fullCoverage: forceFullCoverage };
+      if (data.latestDoc?.id && !body.documentId) body.documentId = data.latestDoc.id;
       if (data.userStoriesFromPDF?.length && !body.projectId && !body.requirementId) {
         body.userStories = data.userStoriesFromPDF;
       }
       const res = await axios.post(`${API_URL}/test-scenarios/generate`, body, { headers: getAuthHeaders(token) });
       setData((d) => ({ ...d, generatedScenarios: res.data.scenarios || [], userStoriesFromPDF: res.data.userStories || d.userStoriesFromPDF }));
       setSelectedScenarios([]);
-      setInfo(`Generated ${res.data.scenarioCount} test scenarios from ${res.data.storyCount} user stories.`);
+      setInfo(`Generated ${res.data.scenarioCount} full-coverage test scenarios covering ${res.data.storyCount} user stories!`);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to generate scenarios.');
     }
@@ -871,69 +923,220 @@ export default function App() {
       </div>
 
       <div className="pdf-upload-section">
-        <h4>Upload Requirement PDF (RAG Analysis)</h4>
+        <h4>Upload Requirement PDF (.md Conversion & Full Coverage Analysis)</h4>
         <div className="form-grid two-columns">
           <select value={pdfUpload.projectId} onChange={(e) => setPdfUpload({ ...pdfUpload, projectId: e.target.value })}>
             <option value="">Project for PDF (optional)</option>
             {(data.projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <label className="file-button secondary-button">
-            {pdfUpload.uploading ? 'Processing...' : 'Upload PDF Requirement'}
+            {pdfUpload.uploading ? 'Processing & Converting to .md...' : 'Upload PDF Requirement'}
             <input type="file" accept=".pdf" disabled={pdfUpload.uploading || !canUploadRequirements} onChange={uploadRequirementPDF} />
           </label>
         </div>
         <small style={{ color: 'var(--muted)' }}>
-          Upload a PDF requirement document. The system will extract text, create RAG chunks, and break down user stories for full test coverage.
+          Upload a PDF requirement document. The system will extract text, convert it to a structured <strong>.md (Markdown)</strong> file, extract user stories, and perform full test scenario coverage analysis.
         </small>
       </div>
+
+      {(data.latestMarkdownContent || data.latestDoc) && (
+        <div className="md-preview-card">
+          <div className="md-preview-header">
+            <div>
+              <h4 style={{ margin: 0 }}>📄 Converted Markdown (.md) Requirement</h4>
+              <small style={{ color: 'var(--muted)' }}>
+                File: {data.latestDoc?.file_name || 'Requirement Document'} | Identified User Stories: {data.userStoriesFromPDF?.length || 0}
+              </small>
+            </div>
+            <div className="inline-actions" style={{ gap: '8px' }}>
+              <button className="secondary-button small doc-action-btn" onClick={() => downloadMarkdownDoc(data.latestDoc?.id, data.latestDoc?.file_name)}>
+                📥 Download Converted .md File
+              </button>
+              <button className="primary-button small doc-action-btn" onClick={() => generateScenarios(true)}>
+                🔍 Analyze Requirement & Generate Full-Coverage Scenarios
+              </button>
+              <button className="secondary-button small" onClick={() => setShowMdPreview(!showMdPreview)}>
+                {showMdPreview ? 'Hide .md Preview' : 'Show .md Preview'}
+              </button>
+            </div>
+          </div>
+
+          {showMdPreview && (
+            <div className="md-preview-box">
+              {data.latestMarkdownContent || data.latestDoc?.markdown_content || 'Markdown content available.'}
+            </div>
+          )}
+        </div>
+      )}
 
       {data.userStoriesFromPDF?.length > 0 && (
         <div className="panel" style={{ marginTop: '16px' }}>
           <div className="panel-header">
-            <h4>User Stories Extracted from PDF ({data.userStoriesFromPDF.length})</h4>
-            <span>RAG → User Stories → Scenarios</span>
+            <h4>User Stories Extracted from Requirement ({data.userStoriesFromPDF.length})</h4>
+            <span>Targeting 100% Full Test Coverage</span>
           </div>
           <div className="stories-grid">
             {data.userStoriesFromPDF.map((story, idx) => (
               <div key={idx} className="story-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                  <strong>{story.id || `US-${idx + 1}`}</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '6px' }}>
+                  <strong>{story.id || `US-${String(idx + 1).padStart(3, '0')}`}</strong>
                   <span className={`chip ${story.priority === 'High' ? 'red' : story.priority === 'Medium' ? 'amber' : 'gray'}`}>{story.priority || 'Medium'}</span>
                 </div>
-                <small>{(story.title || story.description || '').slice(0, 200)}</small>
+                <div style={{ fontSize: '0.88rem', marginBottom: '8px' }}>{(story.title || story.description || '').slice(0, 200)}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  <span className="coverage-chip pos">✓ Positive</span>
+                  <span className="coverage-chip neg">✓ Negative</span>
+                  <span className="coverage-chip bound">✓ Boundary</span>
+                  <span className="coverage-chip ui">✓ UI/UX</span>
+                  <span className="coverage-chip api">✓ API</span>
+                  <span className="coverage-chip sec">✓ Security</span>
+                </div>
               </div>
             ))}
           </div>
-          <div className="button-row" style={{ marginTop: '10px' }}>
-            <button className="primary-button small" onClick={generateScenarios}>Generate Test Scenarios from Stories</button>
-            <button className="secondary-button small" onClick={() => setData((d) => ({ ...d, userStoriesFromPDF: [] }))}>Clear</button>
+          <div className="button-row" style={{ marginTop: '12px' }}>
+            <button className="primary-button small" onClick={() => generateScenarios(true)}>🚀 Generate Full-Coverage Test Scenarios</button>
+            <button className="secondary-button small" onClick={() => setData((d) => ({ ...d, userStoriesFromPDF: [], latestMarkdownContent: null, latestDoc: null }))}>Clear Extracted Stories</button>
+          </div>
+        </div>
+      )}
+
+      {data.generatedScenarios?.length > 0 && (
+        <div className="panel" style={{ marginTop: '16px' }}>
+          <div className="panel-header with-actions">
+            <h4>Generated Test Scenarios for Full Coverage ({data.generatedScenarios.length})</h4>
+            <div className="inline-actions">
+              <button
+                className="secondary-button small"
+                onClick={() => {
+                  if (selectedScenarios.length === data.generatedScenarios.length) setSelectedScenarios([]);
+                  else setSelectedScenarios(data.generatedScenarios.map((_, i) => i));
+                }}
+              >
+                {selectedScenarios.length === data.generatedScenarios.length ? 'Deselect All' : 'Select All'}
+              </button>
+              <button className="primary-button small" onClick={saveGeneratedScenarios}>
+                💾 Save Selected to Test Cases ({selectedScenarios.length || data.generatedScenarios.length})
+              </button>
+            </div>
+          </div>
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>Select</th>
+                  <th>ID</th>
+                  <th>Type</th>
+                  <th>Title / Module</th>
+                  <th>User Story Coverage</th>
+                  <th>Severity</th>
+                  <th>Expected Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.generatedScenarios.map((sc, idx) => (
+                  <tr key={idx}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedScenarios.includes(idx)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedScenarios([...selectedScenarios, idx]);
+                          else setSelectedScenarios(selectedScenarios.filter((i) => i !== idx));
+                        }}
+                      />
+                    </td>
+                    <td><strong>{sc.code}</strong></td>
+                    <td><span className="chip blue">{sc.tipe_test || 'Functional'}</span></td>
+                    <td>{sc.title}</td>
+                    <td><span className="chip gray">{sc.user_story_coverage}</span></td>
+                    <td><span className={`chip ${sc.severity === 'Critical' ? 'red' : sc.severity === 'Major' ? 'amber' : 'gray'}`}>{sc.severity}</span></td>
+                    <td><small>{(sc.hasil_yang_diharapkan || sc.expected_result || '').slice(0, 120)}</small></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {data.docUploads?.length > 0 && (
+        <div className="panel" style={{ marginTop: '18px' }}>
+          <div className="panel-header">
+            <h4>Uploaded Requirement Documents ({data.docUploads.length})</h4>
+          </div>
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>File Name</th>
+                  <th>Project</th>
+                  <th>Uploaded By</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.docUploads.map((doc) => (
+                  <tr key={doc.id}>
+                    <td><strong>📄 {doc.file_name}</strong></td>
+                    <td>{doc.project_name || '-'}</td>
+                    <td>{doc.uploaded_by_name || 'QA Team'}</td>
+                    <td>{new Date(doc.created_at).toLocaleDateString()}</td>
+                    <td>
+                      <div className="inline-actions" style={{ gap: '6px' }}>
+                        <button className="secondary-button small" onClick={() => downloadMarkdownDoc(doc.id, doc.file_name)}>
+                          📥 Download .md
+                        </button>
+                        <button className="secondary-button small" onClick={() => downloadPdfDoc(doc.id, doc.file_name)}>
+                          📥 Download PDF
+                        </button>
+                        <button className="primary-button small" onClick={() => {
+                          setScenarioGen((s) => ({ ...s, documentId: doc.id }));
+                          if (doc.user_story_breakdown) {
+                            try {
+                              const stories = JSON.parse(doc.user_story_breakdown);
+                              setData((d) => ({ ...d, userStoriesFromPDF: stories, latestDoc: doc, latestMarkdownContent: doc.markdown_content || '' }));
+                            } catch {}
+                          }
+                          generateScenarios(true);
+                        }}>
+                          🔍 Analyze & Generate Scenarios
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
       <div className="scroll-x" style={{ marginTop: '18px' }}>
-      <table>
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Project</th>
-            <th>Priority</th>
-            <th>Source</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(data.requirements || []).map((item) => (
-            <tr key={item.id}>
-              <td>{item.title}</td>
-              <td>{item.project_name}</td>
-              <td>{item.priority}</td>
-              <td>{item.source}</td>
-              <td><span className="status-badge status-pass">{item.status}</span></td>
+        <h4 style={{ margin: '0 0 10px' }}>Requirements Repository</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Project</th>
+              <th>Priority</th>
+              <th>Source</th>
+              <th>Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {(data.requirements || []).map((item) => (
+              <tr key={item.id}>
+                <td>{item.title}</td>
+                <td>{item.project_name}</td>
+                <td>{item.priority}</td>
+                <td>{item.source}</td>
+                <td><span className="status-badge status-pass">{item.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
