@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 export async function seedDatabase(pool) {
   const userSeed = [
     {
-      name: 'Arif Rahman',
+      name: 'iskandars',
       email: 'qa.lead@company.com',
       password: 'Password123!',
       role: 'qa_lead',
@@ -12,7 +12,7 @@ export async function seedDatabase(pool) {
       sso_provider: 'local',
     },
     {
-      name: 'Siti Nurasiah',
+      name: 'fadiyah',
       email: 'qa.engineer@company.com',
       password: 'Password123!',
       role: 'qa_engineer',
@@ -21,7 +21,7 @@ export async function seedDatabase(pool) {
       sso_provider: 'local',
     },
     {
-      name: 'Budi Prasetyo',
+      name: 'michael',
       email: 'product@company.com',
       password: 'Password123!',
       role: 'product',
@@ -30,7 +30,7 @@ export async function seedDatabase(pool) {
       sso_provider: 'local',
     },
     {
-      name: 'Rina Kurnia',
+      name: 'Mei',
       email: 'pm@company.com',
       password: 'Password123!',
       role: 'pm',
@@ -39,7 +39,7 @@ export async function seedDatabase(pool) {
       sso_provider: 'local',
     },
     {
-      name: 'Dwi Hartanto',
+      name: 'Tri M',
       email: 'business.analyst@company.com',
       password: 'Password123!',
       role: 'business_analyst',
