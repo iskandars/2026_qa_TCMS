@@ -8,11 +8,11 @@ import autoTable from 'jspdf-autotable';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 const roleMeta = {
-  qa_lead: { label: 'QA Lead', color: '#7f1d1d' },
-  qa_engineer: { label: 'QA Engineer', color: '#b91c1c' },
-  product: { label: 'Product', color: '#991b1b' },
-  pm: { label: 'PM', color: '#dc2626' },
-  business_analyst: { label: 'Business Analyst', color: '#1e3a8a' },
+  qa_lead: { label: 'QA Lead', color: '#0b1a33' },
+  qa_engineer: { label: 'QA Engineer', color: '#1e3a5f' },
+  product: { label: 'Product', color: '#b91c1c' },
+  pm: { label: 'PM', color: '#e30613' },
+  business_analyst: { label: 'Business Analyst', color: '#122545' },
 };
 
 const initialCredentials = {
@@ -24,7 +24,19 @@ const initialCredentials = {
 };
 
 const workflowStatus = ['Open', 'In Progress', 'In Review', 'Rejected', 'Resolved', 'Closed'];
-const navItems = ['overview', 'requirements', 'test-cases', 'test-cycles', 'test-runs', 'execution-board', 'defects', 'reports', 'admin'];
+const navItems = [
+  'overview', 'requirements', 'test-cases', 'test-suites', 'test-plans', 'test-cycles',
+  'test-runs', 'execution-board', 'defects', 'traceability', 'reports', 'activity', 'admin',
+];
+const navLabels = {
+  overview: 'Overview', requirements: 'Requirements', 'test-cases': 'Test Cases',
+  'test-suites': 'Test Suites', 'test-plans': 'Test Plans', 'test-cycles': 'Test Cycles',
+  'test-runs': 'Test Runs', 'execution-board': 'Execution Board', defects: 'Defects',
+  traceability: 'Traceability', reports: 'Reports', activity: 'Activity', admin: 'Admin',
+};
+const reviewStatuses = ['Draft', 'In Review', 'Approved', 'Rejected', 'Deprecated'];
+const executionStatuses = ['Not Executed', 'Passed', 'Failed', 'Retest', 'Blocked', 'Skipped'];
+const runResultStatuses = ['Not Run', 'Passed', 'Failed', 'Blocked', 'Retest', 'Skipped'];
 const testCaseStatuses = ['Draft', 'Review', 'Ready', 'Deprecated', 'Passed', 'Failed'];
 const testCaseSeverities = ['Trivial', 'Minor', 'Major', 'Critical'];
 const testCasePriorities = ['Low', 'Medium', 'High', 'Urgent'];
@@ -119,6 +131,7 @@ export default function App() {
     admin: { rolePermissions: {}, roles: [], users: [] },
     overview: null, advanced: null, estimate: null,
     docUploads: [], generatedScenarios: [], userStoriesFromPDF: [],
+    suites: [], milestones: [], plans: [], sharedSteps: [], tags: [],
     tipeTestOptions: tipeTestDefaults, userRoleOptions: userRoleDefaults,
     searchTerm: '',
   });
@@ -149,6 +162,22 @@ export default function App() {
   const [selectedScenarios, setSelectedScenarios] = useState([]);
   const [estimateScope, setEstimateScope] = useState({ projectId: '', runId: '', cycleId: '' });
 
+  // Phase 2-4 additions
+  const [newSuite, setNewSuite] = useState({ projectId: '', name: '', parentId: '', description: '' });
+  const [newMilestone, setNewMilestone] = useState({ projectId: '', name: '', description: '', status: 'Open', dueDate: '' });
+  const [newPlan, setNewPlan] = useState({ projectId: '', name: '', description: '', status: 'Draft', milestoneId: '' });
+  const [newDefect, setNewDefect] = useState({ projectId: '', title: '', description: '', severity: 'Major', priority: 'Medium', linkedTestCaseId: '', environment: 'SIT', stepsToReproduce: '' });
+  const [showDefectForm, setShowDefectForm] = useState(false);
+  const [editing, setEditing] = useState(null);           // { entity, id, draft }
+  const [selectedCase, setSelectedCase] = useState(null); // test case detail panel
+  const [caseDetail, setCaseDetail] = useState({ steps: [], versions: [], attachments: [] });
+  const [bulkSelection, setBulkSelection] = useState([]);
+  const [bulkPatch, setBulkPatch] = useState({ field: '', value: '' });
+  const [activeRun, setActiveRun] = useState(null);
+  const [runResults, setRunResults] = useState([]);
+  const [reportExtra, setReportExtra] = useState({ coverage: null, trend: null, traceability: null });
+  const [activity, setActivity] = useState([]);
+
   const userRole = user?.role || selectedRole;
 
   const summaryCards = useMemo(() => {
@@ -175,11 +204,10 @@ export default function App() {
     try {
       setLoading(true);
       setError('');
-      setInfo('');
       const headers = getAuthHeaders(token);
       const build = (path) => axios.get(`${API_URL}${path}`, { headers });
 
-      const [overviewRes, projectRes, userRes, requirementRes, cycleRes, executionRes, defectRes, adminRes, testCaseRes, testRunRes, advancedRes, estimateRes, docRes] = await Promise.all([
+      const [overviewRes, projectRes, userRes, requirementRes, cycleRes, executionRes, defectRes, adminRes, testCaseRes, testRunRes, advancedRes, estimateRes, docRes, suiteRes, milestoneRes, planRes, tagRes, traceRes, coverageRes, trendRes, activityRes] = await Promise.all([
         build('/dashboard/overview'),
         build('/projects'),
         build('/users'),
@@ -193,6 +221,14 @@ export default function App() {
         build('/reports/advanced'),
         build('/reports/estimate'),
         build('/requirement-documents'),
+        build('/suites').catch(() => ({ data: { suites: [] } })),
+        build('/milestones').catch(() => ({ data: { milestones: [] } })),
+        build('/test-plans').catch(() => ({ data: { plans: [] } })),
+        build('/tags').catch(() => ({ data: { tags: [] } })),
+        build('/traceability').catch(() => ({ data: { traceability: [], uncoveredCases: [], summary: {} } })),
+        build('/reports/coverage').catch(() => ({ data: { bySuite: [], byMilestone: [], byModule: [] } })),
+        build('/reports/trend').catch(() => ({ data: { runsTrend: [], executionTrend: [] } })),
+        build('/activity?limit=60').catch(() => ({ data: { activity: [] } })),
       ]);
 
       const ov = overviewRes.data;
@@ -212,9 +248,19 @@ export default function App() {
         advanced: advancedRes.data || null,
         estimate: estimateRes.data || null,
         docUploads: docRes.data.documents || [],
+        suites: suiteRes.data.suites || [],
+        milestones: milestoneRes.data.milestones || [],
+        plans: planRes.data.plans || [],
+        tags: tagRes.data.tags || [],
         tipeTestOptions: testCaseRes.data.tipeTestOptions || ov.advancedConfig?.tipeTestOptions || tipeTestDefaults,
         userRoleOptions: testCaseRes.data.userRoleOptions || ov.advancedConfig?.userRoleOptions || userRoleDefaults,
       }));
+      setReportExtra({
+        traceability: traceRes.data,
+        coverage: coverageRes.data,
+        trend: trendRes.data,
+      });
+      setActivity(activityRes.data.activity || []);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load QA workspace.');
     } finally {
@@ -230,6 +276,7 @@ export default function App() {
         admin: { rolePermissions: {}, roles: [], users: [] },
         overview: null, advanced: null, estimate: null,
         docUploads: [], generatedScenarios: [], userStoriesFromPDF: [],
+        suites: [], milestones: [], plans: [], sharedSteps: [], tags: [],
         tipeTestOptions: tipeTestDefaults, userRoleOptions: userRoleDefaults, searchTerm: '',
       });
       return;
@@ -240,10 +287,10 @@ export default function App() {
   const statusSummary = useMemo(() => {
     const summaryMap = Object.fromEntries((data.overview?.byStatus || []).map((item) => [item.status, item.count]));
     return [
-      { label: 'Passed', count: summaryMap.Passed || 0, color: '#16a34a' },
-      { label: 'Failed', count: summaryMap.Failed || 0, color: '#dc2626' },
-      { label: 'Retest', count: summaryMap.Retest || 0, color: '#f59e0b' },
-      { label: 'TBC', count: summaryMap.TBC || 0, color: '#0ea5e9' },
+      { label: 'Passed', count: summaryMap.Passed || 0, color: '#059669' },
+      { label: 'Failed', count: summaryMap.Failed || 0, color: '#e30613' },
+      { label: 'Retest', count: summaryMap.Retest || 0, color: '#d97706' },
+      { label: 'TBC', count: summaryMap.TBC || 0, color: '#1e3a5f' },
     ];
   }, [data.overview]);
 
@@ -358,6 +405,210 @@ export default function App() {
       await axios.patch(`${API_URL}/admin/users/${userId}/role`, { role }, { headers: getAuthHeaders(token) });
       setInfo('Role updated.'); await loadDashboard();
     } catch (err) { setError(err.response?.data?.message || 'Could not update user role.'); }
+  };
+
+  /* ---------- Phase 1-4: generic edit / delete + collaboration handlers ---------- */
+
+  const notify = (message) => { setError(''); setInfo(message); };
+
+  const startEdit = (entity, item) => setEditing({ entity, id: item.id, draft: { ...item } });
+  const cancelEdit = () => setEditing(null);
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    const { entity, id, draft } = editing;
+    try {
+      await axios.put(`${API_URL}/${entity}/${id}`, draft, { headers: getAuthHeaders(token) });
+      setEditing(null);
+      notify('Record updated.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not update record.'); }
+  };
+
+  const deleteEntity = async (entity, id, label) => {
+    if (!window.confirm(`Delete ${label || 'this record'}? This cannot be undone.`)) return;
+    try {
+      await axios.delete(`${API_URL}/${entity}/${id}`, { headers: getAuthHeaders(token) });
+      notify('Record deleted.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not delete record.'); }
+  };
+
+  const createSuite = async () => {
+    if (!newSuite.projectId || !newSuite.name) { setError('Project and suite name are required.'); return; }
+    try {
+      await axios.post(`${API_URL}/suites`, newSuite, { headers: getAuthHeaders(token) });
+      setNewSuite({ projectId: '', name: '', parentId: '', description: '' });
+      notify('Test suite created.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not create suite.'); }
+  };
+
+  const createMilestone = async () => {
+    if (!newMilestone.projectId || !newMilestone.name) { setError('Project and milestone name are required.'); return; }
+    try {
+      await axios.post(`${API_URL}/milestones`, newMilestone, { headers: getAuthHeaders(token) });
+      setNewMilestone({ projectId: '', name: '', description: '', status: 'Open', dueDate: '' });
+      notify('Milestone created.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not create milestone.'); }
+  };
+
+  const createPlan = async () => {
+    if (!newPlan.projectId || !newPlan.name) { setError('Project and plan name are required.'); return; }
+    try {
+      await axios.post(`${API_URL}/test-plans`, newPlan, { headers: getAuthHeaders(token) });
+      setNewPlan({ projectId: '', name: '', description: '', status: 'Draft', milestoneId: '' });
+      notify('Test plan created.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not create test plan.'); }
+  };
+
+  const createDefect = async () => {
+    if (!canCreateDefects) { setError('Only QA Lead / QA Engineer can raise defects.'); return; }
+    if (!newDefect.projectId || !newDefect.title) { setError('Project and defect title are required.'); return; }
+    try {
+      await axios.post(`${API_URL}/defects`, newDefect, { headers: getAuthHeaders(token) });
+      setNewDefect({ projectId: '', title: '', description: '', severity: 'Major', priority: 'Medium', linkedTestCaseId: '', environment: 'SIT', stepsToReproduce: '' });
+      setShowDefectForm(false);
+      notify('Defect created.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not create defect.'); }
+  };
+
+  const createDefectFromExecution = async (executionId) => {
+    try {
+      await axios.post(`${API_URL}/executions/${executionId}/create-defect`, {}, { headers: getAuthHeaders(token) });
+      notify('Defect raised from failed execution.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not create defect from execution.'); }
+  };
+
+  const updateExecution = async (id, patch) => {
+    try {
+      await axios.patch(`${API_URL}/executions/${id}`, patch, { headers: getAuthHeaders(token) });
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not update execution.'); }
+  };
+
+  const openCaseDetail = async (testCase) => {
+    setSelectedCase(testCase);
+    setCaseDetail({ steps: [], versions: [], attachments: [] });
+    try {
+      const headers = getAuthHeaders(token);
+      const [stepsRes, versionsRes, attachRes] = await Promise.all([
+        axios.get(`${API_URL}/test-cases/${testCase.id}/steps`, { headers }),
+        axios.get(`${API_URL}/test-cases/${testCase.id}/versions`, { headers }),
+        axios.get(`${API_URL}/attachments?entityType=test_case&entityId=${testCase.id}`, { headers }),
+      ]);
+      setCaseDetail({
+        steps: stepsRes.data.steps || [],
+        versions: versionsRes.data.versions || [],
+        attachments: attachRes.data.attachments || [],
+      });
+    } catch (err) { setError(err.response?.data?.message || 'Could not load test case details.'); }
+  };
+
+  const refreshCaseDetail = async (id) => {
+    try {
+      const headers = getAuthHeaders(token);
+      const [stepsRes, versionsRes, attachRes] = await Promise.all([
+        axios.get(`${API_URL}/test-cases/${id}/steps`, { headers }),
+        axios.get(`${API_URL}/test-cases/${id}/versions`, { headers }),
+        axios.get(`${API_URL}/attachments?entityType=test_case&entityId=${id}`, { headers }),
+      ]);
+      setCaseDetail({
+        steps: stepsRes.data.steps || [],
+        versions: versionsRes.data.versions || [],
+        attachments: attachRes.data.attachments || [],
+      });
+    } catch (err) { setError(err.response?.data?.message || 'Could not refresh detail.'); }
+  };
+
+  const saveCaseSteps = async (steps) => {
+    if (!selectedCase) return;
+    try {
+      await axios.put(`${API_URL}/test-cases/${selectedCase.id}/steps`, { steps }, { headers: getAuthHeaders(token) });
+      notify('Steps saved.');
+      await refreshCaseDetail(selectedCase.id);
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not save steps.'); }
+  };
+
+  const cloneTestCase = async (id) => {
+    try {
+      await axios.post(`${API_URL}/test-cases/${id}/clone`, {}, { headers: getAuthHeaders(token) });
+      notify('Test case cloned.');
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not clone test case.'); }
+  };
+
+  const reviewTestCase = async (id, reviewStatus) => {
+    try {
+      await axios.post(`${API_URL}/test-cases/${id}/review`, { reviewStatus }, { headers: getAuthHeaders(token) });
+      notify(`Review status: ${reviewStatus}`);
+      if (selectedCase && selectedCase.id === id) await refreshCaseDetail(id);
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not update review status.'); }
+  };
+
+  const uploadAttachment = async (file) => {
+    if (!selectedCase || !file) return;
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('entityType', 'test_case');
+      form.append('entityId', String(selectedCase.id));
+      await axios.post(`${API_URL}/attachments`, form, {
+        headers: { ...getAuthHeaders(token), 'Content-Type': 'multipart/form-data' },
+      });
+      notify('Attachment uploaded.');
+      await refreshCaseDetail(selectedCase.id);
+    } catch (err) { setError(err.response?.data?.message || 'Could not upload attachment.'); }
+  };
+
+  const deleteAttachment = async (id) => {
+    try {
+      await axios.delete(`${API_URL}/attachments/${id}`, { headers: getAuthHeaders(token) });
+      if (selectedCase) await refreshCaseDetail(selectedCase.id);
+    } catch (err) { setError(err.response?.data?.message || 'Could not delete attachment.'); }
+  };
+
+  const applyBulkEdit = async () => {
+    if (!bulkSelection.length) { setError('Select at least one test case.'); return; }
+    if (!bulkPatch.field || bulkPatch.value === '') { setError('Choose a field and value for bulk edit.'); return; }
+    const patch = {
+      status: 'status', severity: 'severity', priority: 'priority', assigneeId: 'assigneeId',
+      tipeTest: 'tipeTest', statusSIT: 'statusSIT', suiteId: 'suiteId', milestoneId: 'milestoneId',
+      reviewStatus: 'reviewStatus', picQA: 'picQA',
+    }[bulkPatch.field];
+    try {
+      await axios.patch(`${API_URL}/test-cases/bulk`, { ids: bulkSelection, patch: { [patch]: bulkPatch.value } }, { headers: getAuthHeaders(token) });
+      notify(`Bulk updated ${bulkSelection.length} test case(s).`);
+      setBulkSelection([]); setBulkPatch({ field: '', value: '' });
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Bulk edit failed.'); }
+  };
+
+  const toggleBulkSelection = (id) => {
+    setBulkSelection((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  };
+
+  const openRun = async (run) => {
+    setActiveRun(run);
+    try {
+      const res = await axios.get(`${API_URL}/test-runs/${run.id}/results`, { headers: getAuthHeaders(token) });
+      setRunResults(res.data.results || []);
+    } catch (err) { setError(err.response?.data?.message || 'Could not load run results.'); }
+  };
+
+  const updateRunResult = async (resultId, patch) => {
+    if (!activeRun) return;
+    try {
+      await axios.patch(`${API_URL}/test-runs/${activeRun.id}/results/${resultId}`, patch, { headers: getAuthHeaders(token) });
+      await openRun(activeRun);
+      await loadDashboard();
+    } catch (err) { setError(err.response?.data?.message || 'Could not update result.'); }
   };
 
   const exportCsv = (records, fileName) => {
@@ -620,7 +871,7 @@ export default function App() {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(22);
       doc.setTextColor(30, 58, 138);
-      doc.text('TCMS QA Report', 40, 60);
+      doc.text('BINA QA TCMS QA Report', 40, 60);
       doc.setFontSize(10);
       doc.setTextColor(100, 116, 139);
       doc.text(`Generated: ${new Date().toLocaleString()}`, 40, 80);
@@ -1123,16 +1374,46 @@ export default function App() {
               <th>Priority</th>
               <th>Source</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {(data.requirements || []).map((item) => (
               <tr key={item.id}>
-                <td>{item.title}</td>
-                <td>{item.project_name}</td>
-                <td>{item.priority}</td>
-                <td>{item.source}</td>
-                <td><span className="status-badge status-pass">{item.status}</span></td>
+                {editing && editing.entity === 'requirements' && editing.id === item.id ? (
+                  <>
+                    <td><input type="text" value={editing.draft.title || ''} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, title: e.target.value } })} /></td>
+                    <td>
+                      <select value={editing.draft.projectId || editing.draft.project_id || ''} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, projectId: e.target.value } })}>
+                        <option value="">-</option>
+                        {(data.projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <select value={editing.draft.priority || 'Medium'} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, priority: e.target.value } })}>
+                        {testCasePriorities.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </td>
+                    <td><input type="text" value={editing.draft.source || ''} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, source: e.target.value } })} /></td>
+                    <td><input type="text" value={editing.draft.status || ''} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, status: e.target.value } })} /></td>
+                    <td className="row-actions">
+                      <button className="primary-button small" onClick={saveEdit}>Save</button>
+                      <button className="ghost-button small" onClick={cancelEdit}>Cancel</button>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td>{item.title}</td>
+                    <td>{item.project_name}</td>
+                    <td>{item.priority}</td>
+                    <td>{item.source}</td>
+                    <td><span className="status-badge status-pass">{item.status}</span></td>
+                    <td className="row-actions">
+                      {canWriteTC && <button className="secondary-button small" onClick={() => startEdit('requirements', { ...item, projectId: item.project_id })}>Edit</button>}
+                      {canWriteTC && <button className="ghost-button small danger" onClick={() => deleteEntity('requirements', item.id, `requirement "${item.title}"`)}>Delete</button>}
+                    </td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
@@ -1140,6 +1421,130 @@ export default function App() {
       </div>
     </div>
   );
+
+  const renderCaseDetail = () => {
+    if (!selectedCase) return null;
+    const steps = caseDetail.steps || [];
+    const updateStep = (idx, patch) => {
+      const next = steps.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+      setCaseDetail({ ...caseDetail, steps: next });
+    };
+    return (
+      <div className="panel" style={{ marginTop: '16px' }}>
+        <div className="panel-header with-actions">
+          <div>
+            <h4>Test Case Detail — {selectedCase.code}</h4>
+            <small>
+              {selectedCase.title} • Review: <strong>{selectedCase.review_status || 'Draft'}</strong> • Version v{selectedCase.version_no || 1}
+            </small>
+          </div>
+          <div className="inline-actions">
+            {canWriteTC && <button className="secondary-button small" onClick={() => cloneTestCase(selectedCase.id)}>Clone</button>}
+            <button className="ghost-button small" onClick={() => { setSelectedCase(null); setCaseDetail({ steps: [], versions: [], attachments: [] }); }}>Close</button>
+          </div>
+        </div>
+
+        <div className="detail-grid">
+          <div>
+            <label className="field-label">Preconditions</label>
+            <div className="detail-value">{selectedCase.preconditions || '-'}</div>
+            <label className="field-label">Langkah Uji (legacy)</label>
+            <div className="detail-value">{selectedCase.langkah_uji || selectedCase.steps || '-'}</div>
+            <label className="field-label">Hasil Yang Diharapkan</label>
+            <div className="detail-value">{selectedCase.hasil_yang_diharapkan || selectedCase.expected_result || '-'}</div>
+          </div>
+
+          <div>
+            <label className="field-label">Review / Approval</label>
+            {canWriteTC ? (
+              <div className="row-actions" style={{ flexWrap: 'wrap', gap: '6px' }}>
+                {reviewStatuses.map((rs) => (
+                  <button
+                    key={rs}
+                    className={`small ${selectedCase.review_status === rs ? 'primary-button' : 'secondary-button'}`}
+                    onClick={() => reviewTestCase(selectedCase.id, rs)}
+                  >
+                    {rs}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="detail-value">{selectedCase.review_status || 'Draft'}</div>
+            )}
+
+            <label className="field-label">Version History ({caseDetail.versions.length})</label>
+            <div className="version-list">
+              {caseDetail.versions.length === 0 && <small style={{ color: 'var(--muted)' }}>No version snapshots yet.</small>}
+              {caseDetail.versions.map((v) => (
+                <div key={v.id} className="version-item">
+                  <span className="chip blue">v{v.version_no}</span>
+                  <span>{v.review_status}</span>
+                  <small>{new Date(v.created_at).toLocaleString()}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="panel" style={{ marginTop: '12px' }}>
+          <div className="panel-header with-actions">
+            <h4>Structured Steps ({steps.length})</h4>
+            <div className="inline-actions">
+              {canWriteTC && (
+                <button className="secondary-button small" onClick={() => setCaseDetail({ ...caseDetail, steps: [...steps, { step_no: steps.length + 1, action: '', expected: '', data: '' }] })}>
+                  Add Step
+                </button>
+              )}
+              {canWriteTC && <button className="primary-button small" onClick={() => saveCaseSteps(steps)}>Save Steps</button>}
+            </div>
+          </div>
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr><th>#</th><th>Action</th><th>Test Data</th><th>Expected Result</th>{canWriteTC && <th></th>}</tr>
+              </thead>
+              <tbody>
+                {steps.map((s, idx) => (
+                  <tr key={s.id || idx}>
+                    <td>{s.step_no || idx + 1}</td>
+                    <td>{canWriteTC ? <textarea rows="2" value={s.action || ''} onChange={(e) => updateStep(idx, { action: e.target.value })} /> : (s.action || '-')}</td>
+                    <td>{canWriteTC ? <textarea rows="2" value={s.data || ''} onChange={(e) => updateStep(idx, { data: e.target.value })} /> : (s.data || '-')}</td>
+                    <td>{canWriteTC ? <textarea rows="2" value={s.expected || ''} onChange={(e) => updateStep(idx, { expected: e.target.value })} /> : (s.expected || '-')}</td>
+                    {canWriteTC && (
+                      <td><button className="ghost-button small danger" onClick={() => setCaseDetail({ ...caseDetail, steps: steps.filter((_, i) => i !== idx) })}>Remove</button></td>
+                    )}
+                  </tr>
+                ))}
+                {steps.length === 0 && <tr><td colSpan={canWriteTC ? 5 : 4}><small style={{ color: 'var(--muted)' }}>No structured steps. Add a step to begin.</small></td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="panel" style={{ marginTop: '12px' }}>
+          <div className="panel-header with-actions">
+            <h4>Attachments & Evidence ({caseDetail.attachments.length})</h4>
+            {canWriteTC && (
+              <label className="secondary-button small file-button">
+                Upload File
+                <input type="file" onChange={(e) => { uploadAttachment(e.target.files?.[0]); e.target.value = ''; }} />
+              </label>
+            )}
+          </div>
+          <div className="attachment-list">
+            {caseDetail.attachments.length === 0 && <small style={{ color: 'var(--muted)' }}>No attachments.</small>}
+            {caseDetail.attachments.map((a) => (
+              <div key={a.id} className="attachment-item">
+                <a href={`${API_URL}/attachments/${a.id}/download`} target="_blank" rel="noreferrer">{a.file_name}</a>
+                <small>{Math.round((a.file_size || 0) / 1024)} KB</small>
+                {canWriteTC && <button className="ghost-button small danger" onClick={() => deleteAttachment(a.id)}>Delete</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderTestCases = () => (
     <div className="panel full-height-panel">
@@ -1371,7 +1776,7 @@ export default function App() {
           </div>
           <div className="scenarios-grid">
             {data.generatedScenarios.map((sc, idx) => (
-              <div key={idx} className="scenario-card" style={{ border: selectedScenarios.includes(idx) ? '2px solid #2563eb' : undefined }}>
+              <div key={idx} className="scenario-card" style={{ border: selectedScenarios.includes(idx) ? '2px solid #e30613' : undefined }}>
                 <div className="checkbox-row">
                   <input type="checkbox" id={`sc-${idx}`} checked={selectedScenarios.includes(idx)} onChange={() => toggleScenarioSelection(idx)} />
                   <label htmlFor={`sc-${idx}`} style={{ fontWeight: 700 }}>{sc.code} - {sc.title?.slice(0, 80)}</label>
@@ -1390,10 +1795,38 @@ export default function App() {
         </div>
       )}
 
+      <div className="bulk-toolbar">
+        <div>
+          <strong>{bulkSelection.length}</strong> selected
+        </div>
+        <select value={bulkPatch.field} onChange={(e) => setBulkPatch({ ...bulkPatch, field: e.target.value })}>
+          <option value="">Bulk field...</option>
+          <option value="status">Status TC</option>
+          <option value="reviewStatus">Review Status</option>
+          <option value="severity">Severity</option>
+          <option value="priority">Priority</option>
+          <option value="tipeTest">Tipe Test</option>
+          <option value="statusSIT">Status SIT</option>
+          <option value="picQA">PIC QA</option>
+          <option value="suiteId">Suite ID</option>
+          <option value="milestoneId">Milestone ID</option>
+        </select>
+        <input type="text" placeholder="New value" value={bulkPatch.value} onChange={(e) => setBulkPatch({ ...bulkPatch, value: e.target.value })} />
+        <button className="primary-button small" disabled={!canWriteTC} onClick={applyBulkEdit}>Apply Bulk Edit</button>
+        <button className="ghost-button small" onClick={() => setBulkSelection([])}>Clear</button>
+      </div>
+
       <div className="scroll-x" style={{ marginTop: '18px' }}>
       <table>
         <thead>
           <tr>
+            <th>
+              <input
+                type="checkbox"
+                checked={filteredTestCases.length > 0 && bulkSelection.length === filteredTestCases.length}
+                onChange={(e) => setBulkSelection(e.target.checked ? filteredTestCases.map((c) => c.id) : [])}
+              />
+            </th>
             <th>Code</th>
             <th>Title / Modul Fitur</th>
             <th>Project</th>
@@ -1401,14 +1834,19 @@ export default function App() {
             <th>Severity</th>
             <th>Priority</th>
             <th>Status TC</th>
+            <th>Review</th>
             <th>Status SIT</th>
             <th>User Story</th>
             <th>PIC QA</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {filteredTestCases.map((item) => (
             <tr key={item.id}>
+              <td>
+                <input type="checkbox" checked={bulkSelection.includes(item.id)} onChange={() => toggleBulkSelection(item.id)} />
+              </td>
               <td><strong>{item.code}</strong></td>
               <td>{item.title || item.modul_fitur}</td>
               <td>{item.project_name}</td>
@@ -1416,14 +1854,23 @@ export default function App() {
               <td>{item.severity}</td>
               <td>{item.priority}</td>
               <td><span className="status-badge status-pass">{item.status}</span></td>
+              <td><span className={`chip ${item.review_status === 'Approved' ? 'green' : item.review_status === 'Rejected' ? 'red' : 'gray'}`}>{item.review_status || 'Draft'}</span></td>
               <td><span className={`status-badge ${item.status_sit === 'Passed' ? 'status-pass' : item.status_sit === 'Failed' ? 'status-danger' : 'status-warn'}`}>{item.status_sit || '-'}</span></td>
               <td>{item.user_story_coverage || '-'}</td>
               <td>{item.pic_qa || '-'}</td>
+              <td className="row-actions">
+                <button className="secondary-button small" onClick={() => openCaseDetail(item)}>Detail</button>
+                {canWriteTC && <button className="secondary-button small" onClick={() => startEdit('test-cases', { ...item, projectId: item.project_id })}>Edit</button>}
+                {canWriteTC && <button className="ghost-button small" onClick={() => cloneTestCase(item.id)}>Clone</button>}
+                {canWriteTC && <button className="ghost-button small danger" onClick={() => deleteEntity('test-cases', item.id, `test case "${item.code}"`)}>Delete</button>}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
       </div>
+
+      {renderCaseDetail()}
     </div>
   );
 
@@ -1467,6 +1914,7 @@ export default function App() {
             <th>Status</th>
             <th>Cases</th>
             <th>Estimate</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -1478,6 +1926,10 @@ export default function App() {
               <td><span className="status-badge status-pass">{item.status}</span></td>
               <td>{item.total_cases || 0}</td>
               <td>{formatMinutes(item.estimated_minutes)}</td>
+              <td className="row-actions">
+                {canManageCycles && <button className="secondary-button small" onClick={() => startEdit('test-cycles', { ...item, projectId: item.project_id, planId: item.plan_id })}>Edit</button>}
+                {canManageCycles && <button className="ghost-button small danger" onClick={() => deleteEntity('test-cycles', item.id, `cycle "${item.name}"`)}>Delete</button>}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -1538,6 +1990,7 @@ export default function App() {
             <th>Passed</th>
             <th>Failed</th>
             <th>Est.</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -1551,11 +2004,54 @@ export default function App() {
               <td><span className="chip green">{item.passed || 0}</span></td>
               <td><span className="chip red">{item.failed || 0}</span></td>
               <td>{formatMinutes(item.estimated_minutes)}</td>
+              <td className="row-actions">
+                <button className="secondary-button small" onClick={() => openRun(item)}>View Results</button>
+                {(canManageCycles || canWriteTC) && <button className="secondary-button small" onClick={() => startEdit('test-runs', { ...item, projectId: item.project_id, cycleId: item.cycle_id })}>Edit</button>}
+                {(canManageCycles || canWriteTC) && <button className="ghost-button small danger" onClick={() => deleteEntity('test-runs', item.id, `test run "${item.name}"`)}>Delete</button>}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
       </div>
+
+      {activeRun && (
+        <div className="panel" style={{ marginTop: '16px' }}>
+          <div className="panel-header with-actions">
+            <div>
+              <h4>Run Results — {activeRun.name}</h4>
+              <small>{runResults.length} result(s)</small>
+            </div>
+            <button className="ghost-button small" onClick={() => { setActiveRun(null); setRunResults([]); }}>Close</button>
+          </div>
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr><th>Code</th><th>Title</th><th>Assignee</th><th>Status</th><th>Elapsed (min)</th><th>Environment</th><th>Notes</th><th>Evidence</th></tr>
+              </thead>
+              <tbody>
+                {runResults.map((r) => (
+                  <tr key={r.id}>
+                    <td><strong>{r.code}</strong></td>
+                    <td>{r.title}</td>
+                    <td>{r.assignee_name || '-'}</td>
+                    <td>
+                      <select value={r.status} onChange={(e) => updateRunResult(r.id, { status: e.target.value })}>
+                        {runResultStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                    <td><input type="number" min="0" style={{ width: '80px' }} defaultValue={r.elapsed_minutes || 0} onBlur={(e) => updateRunResult(r.id, { elapsedMinutes: Number(e.target.value) })} /></td>
+                    <td><input type="text" defaultValue={r.environment || ''} onBlur={(e) => updateRunResult(r.id, { environment: e.target.value })} /></td>
+                    <td><input type="text" defaultValue={r.notes || ''} onBlur={(e) => updateRunResult(r.id, { notes: e.target.value })} /></td>
+                    <td>{r.evidenceUrl ? <a href={r.evidenceUrl} target="_blank" rel="noreferrer">Open</a> : '-'}</td>
+                  </tr>
+                ))}
+                {runResults.length === 0 && <tr><td colSpan="8"><small style={{ color: 'var(--muted)' }}>No results recorded for this run.</small></td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -1579,6 +2075,18 @@ export default function App() {
                 <span>{item.title || item.cycle_name}</span>
                 <small>{item.project_name} • {item.cycle_name}</small>
                 <small>Type: {item.tipe_test || '-'} • Sev: {item.severity}</small>
+                <select value={item.status} onChange={(e) => updateExecution(item.id, { status: e.target.value })}>
+                  {executionStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <textarea
+                  rows="2"
+                  placeholder="Execution notes..."
+                  defaultValue={item.notes || ''}
+                  onBlur={(e) => { if (e.target.value !== (item.notes || '')) updateExecution(item.id, { notes: e.target.value }); }}
+                />
+                {item.status === 'Failed' && canCreateDefects && (
+                  <button className="ghost-button small danger" onClick={() => createDefectFromExecution(item.id)}>Create Defect</button>
+                )}
               </div>
             ))}
           </div>
@@ -1592,10 +2100,42 @@ export default function App() {
       <div className="panel-header with-actions">
         <h3>Defect Workflow States ({(data.defects || []).length})</h3>
         <div className="inline-actions">
+          {canCreateDefects && (
+            <button className="primary-button small" onClick={() => setShowDefectForm(!showDefectForm)}>
+              {showDefectForm ? 'Hide Form' : 'New Defect'}
+            </button>
+          )}
           <button className="primary-button small" onClick={() => exportCsv(data.defects, 'defects.csv')}>Export CSV</button>
           <button className="secondary-button small" onClick={() => exportXlsx(data.defects, 'defects.xlsx')}>Export XLSX</button>
         </div>
       </div>
+
+      {showDefectForm && canCreateDefects && (
+        <div className="form-grid two-columns">
+          <select value={newDefect.projectId} onChange={(e) => setNewDefect({ ...newDefect, projectId: e.target.value })}>
+            <option value="">Select project</option>
+            {(data.projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <input type="text" placeholder="Defect title" value={newDefect.title} onChange={(e) => setNewDefect({ ...newDefect, title: e.target.value })} />
+          <select value={newDefect.severity} onChange={(e) => setNewDefect({ ...newDefect, severity: e.target.value })}>
+            {testCaseSeverities.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={newDefect.priority} onChange={(e) => setNewDefect({ ...newDefect, priority: e.target.value })}>
+            {testCasePriorities.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={newDefect.linkedTestCaseId} onChange={(e) => setNewDefect({ ...newDefect, linkedTestCaseId: e.target.value })}>
+            <option value="">Linked Test Case (optional)</option>
+            {(data.testCases || []).map((tc) => <option key={tc.id} value={tc.id}>{tc.code} - {tc.title?.slice(0, 40)}</option>)}
+          </select>
+          <input type="text" placeholder="Environment (e.g. SIT)" value={newDefect.environment} onChange={(e) => setNewDefect({ ...newDefect, environment: e.target.value })} />
+          <textarea className="full-width" rows="3" placeholder="Description" value={newDefect.description} onChange={(e) => setNewDefect({ ...newDefect, description: e.target.value })} />
+          <textarea className="full-width" rows="3" placeholder="Steps to reproduce" value={newDefect.stepsToReproduce} onChange={(e) => setNewDefect({ ...newDefect, stepsToReproduce: e.target.value })} />
+          <div className="button-row">
+            <button className="primary-button" onClick={createDefect}>Create Defect</button>
+            <button className="secondary-button" onClick={() => setShowDefectForm(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       <div className="reports-filters">
         <div>
@@ -1640,6 +2180,7 @@ export default function App() {
             <th>Assignee</th>
             <th>Status</th>
             <th>Update</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -1662,6 +2203,10 @@ export default function App() {
                 <select value={item.status} onChange={(e) => updateDefectStatus(item.id, e.target.value)}>
                   {(data.workflow || workflowStatus).map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
+              </td>
+              <td className="row-actions">
+                {canCreateDefects && <button className="secondary-button small" onClick={() => startEdit('defects', { ...item, projectId: item.project_id, linkedTestCaseId: item.linked_test_case_id })}>Edit</button>}
+                {canCreateDefects && <button className="ghost-button small danger" onClick={() => deleteEntity('defects', item.id, `defect "${item.title}"`)}>Delete</button>}
               </td>
             </tr>
           ))}
@@ -1694,7 +2239,7 @@ export default function App() {
         </div>
 
         <div className="tab-row">
-          {['summary', 'distribution', 'traceability', 'estimate'].map((t) => (
+          {['summary', 'distribution', 'traceability', 'coverage', 'trend', 'estimate'].map((t) => (
             <button key={t} className={reportTab === t ? 'active' : ''} onClick={() => setReportTab(t)}>
               {t.replace(/^\w/, (c) => c.toUpperCase()).replace(/-([a-z])/g, (_, c) => ' ' + c.toUpperCase())}
             </button>
@@ -1896,6 +2441,133 @@ export default function App() {
           </div>
         )}
 
+        {reportTab === 'coverage' && (
+          <>
+            <div className="two-column-grid">
+              <div className="panel">
+                <div className="panel-header"><h4>Coverage by Test Suite</h4></div>
+                <div className="scroll-x">
+                  <table>
+                    <thead><tr><th>Suite</th><th>Total</th><th>Approved</th><th>Passed</th><th>Failed</th><th>Coverage</th></tr></thead>
+                    <tbody>
+                      {(reportExtra.coverage?.bySuite || []).map((s) => (
+                        <tr key={s.suite_id ?? s.suite_name}>
+                          <td>{s.suite_name}</td>
+                          <td>{s.total}</td>
+                          <td>{s.approved}</td>
+                          <td>{s.passed}</td>
+                          <td>{s.failed}</td>
+                          <td>{s.total ? Math.round((s.passed / s.total) * 100) : 0}%</td>
+                        </tr>
+                      ))}
+                      {(reportExtra.coverage?.bySuite || []).length === 0 && <tr><td colSpan="6"><small style={{ color: 'var(--muted)' }}>No suite coverage data.</small></td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-header"><h4>Coverage by Milestone</h4></div>
+                <div className="scroll-x">
+                  <table>
+                    <thead><tr><th>Milestone</th><th>Due</th><th>Total</th><th>Passed</th><th>Failed</th></tr></thead>
+                    <tbody>
+                      {(reportExtra.coverage?.byMilestone || []).map((m) => (
+                        <tr key={m.milestone_name}>
+                          <td>{m.milestone_name}</td>
+                          <td>{m.due_date ? new Date(m.due_date).toLocaleDateString() : '-'}</td>
+                          <td>{m.total}</td>
+                          <td><span className="chip green">{m.passed}</span></td>
+                          <td><span className="chip red">{m.failed}</span></td>
+                        </tr>
+                      ))}
+                      {(reportExtra.coverage?.byMilestone || []).length === 0 && <tr><td colSpan="5"><small style={{ color: 'var(--muted)' }}>No milestone coverage data.</small></td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel" style={{ marginTop: '12px' }}>
+              <div className="panel-header"><h4>Coverage by Module</h4></div>
+              <div className="scroll-x">
+                <table>
+                  <thead><tr><th>Modul &amp; Fitur</th><th>Total</th><th>Passed</th><th>Failed</th><th>Coverage</th></tr></thead>
+                  <tbody>
+                    {(reportExtra.coverage?.byModule || []).map((m) => {
+                      const pct = m.total ? Math.round((m.passed / m.total) * 100) : 0;
+                      return (
+                        <tr key={m.modul_fitur}>
+                          <td>{m.modul_fitur}</td>
+                          <td>{m.total}</td>
+                          <td>{m.passed}</td>
+                          <td>{m.failed}</td>
+                          <td>
+                            <div className="coverage-bar">
+                              <div className="coverage-bar-fill" style={{ width: `${pct}%` }} />
+                              <span>{pct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {(reportExtra.coverage?.byModule || []).length === 0 && <tr><td colSpan="5"><small style={{ color: 'var(--muted)' }}>No module coverage data.</small></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {reportTab === 'trend' && (
+          <div className="two-column-grid">
+            <div className="panel">
+              <div className="panel-header"><h4>Run Creation Trend</h4></div>
+              <div className="scroll-x">
+                <table>
+                  <thead><tr><th>Date</th><th>Runs</th><th>Passed</th><th>Failed</th><th>Blocked/Retest</th></tr></thead>
+                  <tbody>
+                    {(reportExtra.trend?.runsTrend || []).map((p) => (
+                      <tr key={p.day}>
+                        <td>{new Date(p.day).toLocaleDateString()}</td>
+                        <td>{p.runs}</td>
+                        <td><span className="chip green">{p.passed}</span></td>
+                        <td><span className="chip red">{p.failed}</span></td>
+                        <td><span className="chip amber">{p.blocked}</span></td>
+                      </tr>
+                    ))}
+                    {(reportExtra.trend?.runsTrend || []).length === 0 && <tr><td colSpan="5"><small style={{ color: 'var(--muted)' }}>No run trend data.</small></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-header"><h4>Execution Trend</h4></div>
+              <div className="scroll-x">
+                <table>
+                  <thead><tr><th>Date</th><th>Passed</th><th>Failed</th><th>Total</th><th>Pass Rate</th></tr></thead>
+                  <tbody>
+                    {(reportExtra.trend?.executionTrend || []).map((p) => {
+                      const total = (p.passed || 0) + (p.failed || 0);
+                      return (
+                        <tr key={p.day}>
+                          <td>{new Date(p.day).toLocaleDateString()}</td>
+                          <td><span className="chip green">{p.passed}</span></td>
+                          <td><span className="chip red">{p.failed}</span></td>
+                          <td>{total}</td>
+                          <td>{total ? Math.round((p.passed / total) * 100) : 0}%</td>
+                        </tr>
+                      );
+                    })}
+                    {(reportExtra.trend?.executionTrend || []).length === 0 && <tr><td colSpan="5"><small style={{ color: 'var(--muted)' }}>No execution trend data.</small></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {reportTab === 'estimate' && (
           <div className="estimate-section">
             <h4>Testing Time Estimation</h4>
@@ -2010,15 +2682,324 @@ export default function App() {
     </div>
   );
 
+  const renderSuites = () => (
+    <div className="panel full-height-panel">
+      <div className="panel-header with-actions">
+        <div>
+          <h3>Test Suites &amp; Folders ({(data.suites || []).length})</h3>
+          <small>Group test cases into reusable suites for TestRail / Kiwi TCMS-style organisation</small>
+        </div>
+        <div className="inline-actions">
+          <button className="secondary-button small" onClick={() => exportCsv(data.suites, 'test-suites.csv')}>Export CSV</button>
+        </div>
+      </div>
+
+      {canWriteTC && (
+        <>
+          <div className="form-grid two-columns">
+            <select value={newSuite.projectId} onChange={(e) => setNewSuite({ ...newSuite, projectId: e.target.value })}>
+              <option value="">Select project *</option>
+              {(data.projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <input type="text" placeholder="Suite name *" value={newSuite.name} onChange={(e) => setNewSuite({ ...newSuite, name: e.target.value })} />
+            <select value={newSuite.parentId} onChange={(e) => setNewSuite({ ...newSuite, parentId: e.target.value })}>
+              <option value="">No parent (top level)</option>
+              {(data.suites || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <input type="text" placeholder="Description" value={newSuite.description} onChange={(e) => setNewSuite({ ...newSuite, description: e.target.value })} />
+          </div>
+          <div className="button-row">
+            <button className="primary-button" onClick={createSuite}>Create Suite</button>
+          </div>
+        </>
+      )}
+
+      <div className="scroll-x">
+        <table>
+          <thead>
+            <tr><th>Suite</th><th>Parent</th><th>Project</th><th>Cases</th><th>Description</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {(data.suites || []).map((item) => {
+              const isEditing = editing?.entity === 'suites' && editing.id === item.id;
+              return (
+                <tr key={item.id}>
+                  <td>
+                    {isEditing
+                      ? <input type="text" value={editing.draft.name} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, name: e.target.value } })} />
+                      : <strong>{item.name}</strong>}
+                  </td>
+                  <td>{item.parent_name || '-'}</td>
+                  <td>{item.project_name}</td>
+                  <td><span className="chip">{item.case_count || 0}</span></td>
+                  <td>
+                    {isEditing
+                      ? <input type="text" value={editing.draft.description || ''} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, description: e.target.value } })} />
+                      : (item.description || '-')}
+                  </td>
+                  <td className="row-actions">
+                    {isEditing ? (
+                      <>
+                        <button className="primary-button small" onClick={saveEdit}>Save</button>
+                        <button className="ghost-button small" onClick={cancelEdit}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        {canWriteTC && <button className="secondary-button small" onClick={() => startEdit('suites', item)}>Edit</button>}
+                        {canWriteTC && <button className="ghost-button small danger" onClick={() => deleteEntity('suites', item.id, `suite "${item.name}"`)}>Delete</button>}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {!(data.suites || []).length && <tr><td colSpan="6">No suites yet. Create one to organise your test cases.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const renderPlans = () => (
+    <>
+      <div className="panel" style={{ marginBottom: '18px' }}>
+        <div className="panel-header with-actions">
+          <div>
+            <h3>Milestones ({(data.milestones || []).length})</h3>
+            <small>TestRail-style milestones to group test plans against a release target</small>
+          </div>
+        </div>
+        {(canManageCycles || canWriteTC) && (
+          <div className="form-grid two-columns">
+            <select value={newMilestone.projectId} onChange={(e) => setNewMilestone({ ...newMilestone, projectId: e.target.value })}>
+              <option value="">Select project *</option>
+              {(data.projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <input type="text" placeholder="Milestone name *" value={newMilestone.name} onChange={(e) => setNewMilestone({ ...newMilestone, name: e.target.value })} />
+            <input type="date" value={newMilestone.dueDate} onChange={(e) => setNewMilestone({ ...newMilestone, dueDate: e.target.value })} />
+            <select value={newMilestone.status} onChange={(e) => setNewMilestone({ ...newMilestone, status: e.target.value })}>
+              {['Open', 'In Progress', 'Completed', 'Cancelled'].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <input className="full-width" type="text" placeholder="Description" value={newMilestone.description} onChange={(e) => setNewMilestone({ ...newMilestone, description: e.target.value })} />
+          </div>
+        )}
+        {(canManageCycles || canWriteTC) && (
+          <div className="button-row"><button className="primary-button" onClick={createMilestone}>Create Milestone</button></div>
+        )}
+        <div className="scroll-x">
+          <table>
+            <thead><tr><th>Milestone</th><th>Project</th><th>Due Date</th><th>Status</th><th>Cases</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(data.milestones || []).map((item) => {
+                const isEditing = editing?.entity === 'milestones' && editing.id === item.id;
+                return (
+                  <tr key={item.id}>
+                    <td>{isEditing
+                      ? <input type="text" value={editing.draft.name} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, name: e.target.value } })} />
+                      : <strong>{item.name}</strong>}</td>
+                    <td>{item.project_name}</td>
+                    <td>{isEditing
+                      ? <input type="date" value={(editing.draft.due_date || '').slice(0, 10)} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, due_date: e.target.value } })} />
+                      : (item.due_date ? String(item.due_date).slice(0, 10) : '-')}</td>
+                    <td><span className="status-badge status-pass">{item.status}</span></td>
+                    <td><span className="chip">{item.case_count || 0}</span></td>
+                    <td className="row-actions">
+                      {isEditing ? (
+                        <><button className="primary-button small" onClick={saveEdit}>Save</button><button className="ghost-button small" onClick={cancelEdit}>Cancel</button></>
+                      ) : (
+                        <>{canManageCycles && <button className="secondary-button small" onClick={() => startEdit('milestones', item)}>Edit</button>}
+                          {canManageCycles && <button className="ghost-button small danger" onClick={() => deleteEntity('milestones', item.id, `milestone "${item.name}"`)}>Delete</button>}</>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!(data.milestones || []).length && <tr><td colSpan="6">No milestones yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="panel full-height-panel">
+        <div className="panel-header with-actions">
+          <div>
+            <h3>Test Plans ({(data.plans || []).length})</h3>
+            <small>Xray-style test plans linking milestones to execution cycles</small>
+          </div>
+          <div className="inline-actions">
+            <button className="secondary-button small" onClick={() => exportCsv(data.plans, 'test-plans.csv')}>Export CSV</button>
+          </div>
+        </div>
+        {(canManageCycles || canWriteTC) && (
+          <>
+            <div className="form-grid two-columns">
+              <select value={newPlan.projectId} onChange={(e) => setNewPlan({ ...newPlan, projectId: e.target.value })}>
+                <option value="">Select project *</option>
+                {(data.projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <input type="text" placeholder="Plan name *" value={newPlan.name} onChange={(e) => setNewPlan({ ...newPlan, name: e.target.value })} />
+              <select value={newPlan.milestoneId} onChange={(e) => setNewPlan({ ...newPlan, milestoneId: e.target.value })}>
+                <option value="">No milestone</option>
+                {(data.milestones || []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+              <select value={newPlan.status} onChange={(e) => setNewPlan({ ...newPlan, status: e.target.value })}>
+                {['Draft', 'Active', 'Completed', 'Archived'].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <input className="full-width" type="text" placeholder="Description" value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} />
+            </div>
+            <div className="button-row"><button className="primary-button" onClick={createPlan}>Create Test Plan</button></div>
+          </>
+        )}
+        <div className="scroll-x">
+          <table>
+            <thead><tr><th>Plan</th><th>Project</th><th>Milestone</th><th>Status</th><th>Cycles</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(data.plans || []).map((item) => {
+                const isEditing = editing?.entity === 'test-plans' && editing.id === item.id;
+                return (
+                  <tr key={item.id}>
+                    <td>{isEditing
+                      ? <input type="text" value={editing.draft.name} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, name: e.target.value } })} />
+                      : <strong>{item.name}</strong>}</td>
+                    <td>{item.project_name}</td>
+                    <td>{item.milestone_name || '-'}</td>
+                    <td><span className="status-badge status-pass">{item.status}</span></td>
+                    <td><span className="chip">{item.cycle_count || 0}</span></td>
+                    <td className="row-actions">
+                      {isEditing ? (
+                        <><button className="primary-button small" onClick={saveEdit}>Save</button><button className="ghost-button small" onClick={cancelEdit}>Cancel</button></>
+                      ) : (
+                        <>{canManageCycles && <button className="secondary-button small" onClick={() => startEdit('test-plans', item)}>Edit</button>}
+                          {canManageCycles && <button className="ghost-button small danger" onClick={() => deleteEntity('test-plans', item.id, `plan "${item.name}"`)}>Delete</button>}</>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!(data.plans || []).length && <tr><td colSpan="6">No test plans yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+
+  const renderTraceability = () => {
+    const t = reportExtra.traceability || { traceability: [], uncoveredCases: [], summary: {} };
+    const rows = t.traceability || [];
+    const summary = t.summary || {};
+    return (
+      <div className="panel full-height-panel">
+        <div className="panel-header with-actions">
+          <div>
+            <h3>Requirement Traceability Matrix</h3>
+            <small>Xray / TestLink-style coverage: requirement → test cases → execution status</small>
+          </div>
+          <div className="inline-actions">
+            <button className="secondary-button small" onClick={() => exportCsv(rows, 'traceability.csv')}>Export CSV</button>
+          </div>
+        </div>
+
+        <section className="kpi-row">
+          <div className="kpi-item"><strong>{summary.totalRequirements || 0}</strong><small>Requirements</small></div>
+          <div className="kpi-item"><strong>{summary.coveredRequirements || 0}</strong><small>Covered</small></div>
+          <div className="kpi-item"><strong>{summary.totalCases || 0}</strong><small>Test Cases</small></div>
+          <div className="kpi-item"><strong>{summary.uncoveredCases || 0}</strong><small>Uncovered Cases</small></div>
+          <div className="kpi-item">
+            <strong>{summary.totalRequirements ? Math.round(((summary.coveredRequirements || 0) / summary.totalRequirements) * 100) : 0}%</strong>
+            <small>Requirement Coverage</small>
+          </div>
+        </section>
+
+        <div className="scroll-x">
+          <table>
+            <thead>
+              <tr><th>Requirement</th><th>Project</th><th>Priority</th><th>Status</th><th>TC Linked</th><th>Approved</th><th>Passed</th><th>Coverage</th><th>Linked Cases</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td><strong>{r.title}</strong></td>
+                  <td>{r.project_name || '-'}</td>
+                  <td>{r.priority}</td>
+                  <td><span className="status-badge status-pass">{r.status}</span></td>
+                  <td>{r.case_count}</td>
+                  <td>{r.approved_count}</td>
+                  <td>{r.passed_count}</td>
+                  <td><strong>{r.coverage_percent}%</strong></td>
+                  <td>{(r.testCases || []).map((tc) => <span key={tc.id} className="chip">{tc.code}</span>)}</td>
+                </tr>
+              ))}
+              {!rows.length && <tr><td colSpan="9">No requirements found.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="panel" style={{ marginTop: '16px' }}>
+          <div className="panel-header"><h4>Uncovered Test Cases ({(t.uncoveredCases || []).length})</h4></div>
+          <div className="scroll-x">
+            <table>
+              <thead><tr><th>Code</th><th>Title</th><th>Module</th><th>Review</th></tr></thead>
+              <tbody>
+                {(t.uncoveredCases || []).map((tc) => (
+                  <tr key={tc.id}>
+                    <td><strong>{tc.code}</strong></td>
+                    <td>{tc.title}</td>
+                    <td>{tc.modul_fitur || '-'}</td>
+                    <td><span className="chip">{tc.review_status || 'Draft'}</span></td>
+                  </tr>
+                ))}
+                {!(t.uncoveredCases || []).length && <tr><td colSpan="4">Every test case is linked to a requirement.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderActivity = () => (
+    <div className="panel full-height-panel">
+      <div className="panel-header with-actions">
+        <div>
+          <h3>Activity &amp; Audit Log ({activity.length})</h3>
+          <small>Chronological trace of every create / update / review / execution action</small>
+        </div>
+        <div className="inline-actions">
+          <button className="secondary-button small" onClick={loadDashboard}>Refresh</button>
+        </div>
+      </div>
+      <div className="activity-feed">
+        {activity.map((a) => (
+          <div key={a.id} className="activity-item">
+            <div className="user-avatar small">{a.actor_avatar || (a.actor_name || '?').slice(0, 2).toUpperCase()}</div>
+            <div className="activity-body">
+              <strong>{a.actor_name || 'System'}</strong>
+              <span className="chip">{a.action}</span>
+              <span className="chip gray">{a.entity_type}{a.entity_id ? ` #${a.entity_id}` : ''}</span>
+              <small>{a.detail}</small>
+            </div>
+            <small className="activity-time">{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</small>
+          </div>
+        ))}
+        {!activity.length && <div className="loading-box">No activity recorded yet.</div>}
+      </div>
+    </div>
+  );
+
   const renderActiveTab = () => {
     switch (activeTab) {
       case 'requirements': return renderRequirements();
       case 'test-cases': return renderTestCases();
+      case 'test-suites': return renderSuites();
+      case 'test-plans': return renderPlans();
       case 'test-cycles': return renderCycles();
       case 'test-runs': return renderTestRuns();
       case 'execution-board': return renderExecutionBoard();
       case 'defects': return renderDefects();
+      case 'traceability': return renderTraceability();
       case 'reports': return renderReports();
+      case 'activity': return renderActivity();
       case 'admin': return renderAdmin();
       case 'overview':
       default: return renderOverview();
@@ -2081,12 +3062,12 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand-name">BID TCMS</div>
+        <div className="brand-name">BINA QA TCMS</div>
         <nav className="nav-menu">
           <span className="nav-label">Workflow</span>
           {navItems.map((item) => (
             <button key={item} type="button" className={activeTab === item ? 'nav-item active' : 'nav-item'} onClick={() => handleTabClick(item)}>
-              {item.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())}
+              {navLabels[item] || item.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())}
             </button>
           ))}
         </nav>
@@ -2112,14 +3093,9 @@ export default function App() {
             <button type="button" className="theme-toggle-btn" onClick={toggleTheme}>
               {theme === 'light' ? '🌙 Dark Mode' : '☀️ Light Mode'}
             </button>
-            <span className="badge" style={{ backgroundColor: roleMeta[userRole]?.color || '#1e3a8a' }}>
+            <span className="badge" style={{ backgroundColor: roleMeta[userRole]?.color || '#0b1a33' }}>
               {roleMeta[userRole]?.label || 'User'}
             </span>
-            {(canManageCycles || canWriteTC) && (
-              <button className="primary-button small" onClick={() => setShowTestRunForm(!showTestRunForm)}>
-                {showTestRunForm ? 'Cancel' : 'New Test Run'}
-              </button>
-            )}
           </div>
         </header>
 
@@ -2127,32 +3103,6 @@ export default function App() {
         {loading ? <div className="loading-box">Loading QA workspace...</div> : null}
         {error ? <div className="error-box">{error}</div> : null}
         {info ? <div className="info-box">{info}</div> : null}
-
-        {showTestRunForm && activeTab !== 'test-runs' && (
-          <div className="panel" style={{ marginBottom: '20px' }}>
-            <div className="panel-header"><h3>Create New Test Run</h3></div>
-            <div className="form-grid two-columns">
-              <select value={newTestRun.projectId} onChange={(e) => setNewTestRun({ ...newTestRun, projectId: e.target.value })}>
-                <option value="">Select project</option>
-                {(data.projects || []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-              </select>
-              <input type="text" placeholder="Test run name" value={newTestRun.name} onChange={(e) => setNewTestRun({ ...newTestRun, name: e.target.value })} />
-              <select value={newTestRun.cycleId} onChange={(e) => setNewTestRun({ ...newTestRun, cycleId: e.target.value })}>
-                <option value="">Select execution cycle (optional)</option>
-                {(data.cycles || []).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
-              </select>
-              <select value={newTestRun.status} onChange={(e) => setNewTestRun({ ...newTestRun, status: e.target.value })}>
-                <option value="Planned">Planned</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Completed">Completed</option>
-              </select>
-              <div className="button-row">
-                <button className="primary-button" onClick={createTestRun}>Create Test Run</button>
-                <button className="secondary-button" onClick={() => setShowTestRunForm(false)}>Cancel</button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {renderActiveTab()}
       </main>

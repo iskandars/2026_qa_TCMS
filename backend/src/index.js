@@ -50,6 +50,12 @@ const upload = multer({
   },
 });
 
+// Generic attachment uploader — accepts any file type (evidence, screenshots, logs).
+const uploadAny = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
 const ROLE_LABELS = {
   qa_lead: 'QA Lead',
   qa_engineer: 'QA Engineer',
@@ -348,7 +354,7 @@ async function queryLLM(prompt, fallback) {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'TCMS API running', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', message: 'BINA QA TCMS API running', timestamp: new Date().toISOString() });
 });
 
 app.get('/api/auth/sso/config', (req, res) => {
@@ -659,8 +665,8 @@ app.post('/api/test-cases', requireAuth, requireRoles('qa_lead', 'qa_engineer', 
         tags, steps, expected_result, modul_fitur, user_story_coverage, tipe_test, user_role,
         tujuan_pengujian, langkah_uji, validasi_data_uji, hasil_yang_diharapkan,
         pic_qa, status_sit, date_sit_executed, date_sit_done, object_test_version,
-        api_version, test_scenario_version, requirement_id
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+        api_version, test_scenario_version, requirement_id, suite_id, milestone_id, preconditions
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
       RETURNING *`,
       [
         body.projectId, body.code, body.title, body.summary || '', body.status || 'Draft', body.severity || 'Medium',
@@ -675,9 +681,12 @@ app.post('/api/test-cases', requireAuth, requireRoles('qa_lead', 'qa_engineer', 
         body.dateSITExecuted || body.date_sit_executed || null, body.dateSITDone || body.date_sit_done || null,
         body.objectTestVersion || body.object_test_version || '', body.apiVersion || body.api_version || '',
         body.testScenarioVersion || body.test_scenario_version || '', body.requirementId || body.requirement_id || null,
+        body.suiteId || body.suite_id || null, body.milestoneId || body.milestone_id || null,
+        body.preconditions || '',
       ]
     );
 
+    await logActivity(req.user.sub, 'test_case', result.rows[0].id, 'create', result.rows[0].code);
     res.status(201).json({ testCase: result.rows[0] });
   } catch (error) {
     res.status(500).json({ message: error.message || 'Unable to create test case.' });
@@ -943,11 +952,14 @@ app.get('/api/test-runs', requireAuth, async (req, res) => {
 app.get('/api/test-cycles', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT tc.*, p.name AS project_name, u.name AS owner_name,
-        (SELECT COUNT(*) FROM cycle_cases c WHERE c.cycle_id = tc.id) AS total_cases
+      SELECT tc.*, p.name AS project_name, u.name AS owner_name, tp.name AS plan_name,
+        (SELECT COUNT(*) FROM cycle_cases c WHERE c.cycle_id = tc.id) AS total_cases,
+        (SELECT COUNT(*) FROM cycle_cases c WHERE c.cycle_id = tc.id AND c.status = 'Passed') AS passed_cases,
+        (SELECT COUNT(*) FROM cycle_cases c WHERE c.cycle_id = tc.id AND c.status = 'Failed') AS failed_cases
       FROM test_cycles tc
       LEFT JOIN projects p ON p.id = tc.project_id
       LEFT JOIN users u ON u.id = tc.owner_id
+      LEFT JOIN test_plans tp ON tp.id = tc.plan_id
       ORDER BY tc.updated_at DESC
     `);
     res.json({ cycles: result.rows });
@@ -957,7 +969,7 @@ app.get('/api/test-cycles', requireAuth, async (req, res) => {
 });
 
 app.post('/api/test-cycles', requireAuth, requireRoles('qa_lead', 'pm'), async (req, res) => {
-  const { projectId, name, status = 'Planned', ownerId, summary } = req.body || {};
+  const { projectId, name, status = 'Planned', ownerId, summary, planId, testCaseIds } = req.body || {};
   if (!projectId || !name) {
     return res.status(400).json({ message: 'Project and cycle name are required.' });
   }
@@ -967,12 +979,26 @@ app.post('/api/test-cycles', requireAuth, requireRoles('qa_lead', 'pm'), async (
     const estimatedMinutes = tcs.rows.reduce((sum, tc) => sum + estimateTestCaseTime(tc), 0);
 
     const result = await pool.query(
-      `INSERT INTO test_cycles (project_id, name, status, owner_id, summary, planned_start, planned_end, estimated_minutes)
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW() + INTERVAL '7 days', $6)
+      `INSERT INTO test_cycles (project_id, name, status, owner_id, summary, planned_start, planned_end, estimated_minutes, plan_id)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW() + INTERVAL '7 days', $6, $7)
        RETURNING *`,
-      [projectId, name, status, ownerId || req.user.sub, summary || '', estimatedMinutes]
+      [projectId, name, status, ownerId || req.user.sub, summary || '', estimatedMinutes, planId || null]
     );
-    res.status(201).json({ cycle: result.rows[0], estimatedMinutes });
+
+    const cycleId = result.rows[0].id;
+    const selected = Array.isArray(testCaseIds) && testCaseIds.length
+      ? tcs.rows.filter((tc) => testCaseIds.map(Number).includes(tc.id))
+      : tcs.rows;
+
+    for (const tc of selected.slice(0, 150)) {
+      await pool.query(
+        `INSERT INTO cycle_cases (cycle_id, test_case_id, status, assignee_id) VALUES ($1, $2, 'Not Executed', $3)`,
+        [cycleId, tc.id, tc.assignee_id || req.user.sub]
+      );
+    }
+
+    await logActivity(req.user.sub, 'test_cycle', cycleId, 'create', name);
+    res.status(201).json({ cycle: result.rows[0], estimatedMinutes, caseCount: selected.length });
   } catch (error) {
     res.status(500).json({ message: error.message || 'Unable to create test cycle.' });
   }
@@ -1267,7 +1293,7 @@ app.get('/api/reports/pdf', requireAuth, async (req, res) => {
       res.send(pdfBuffer);
     });
 
-    doc.fontSize(22).fillColor('#1e3a8a').text('TCMS QA Report', { align: 'center' });
+    doc.fontSize(22).fillColor('#1e3a8a').text('BINA QA TCMS QA Report', { align: 'center' });
     doc.fontSize(10).fillColor('#475569').text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
     doc.moveDown(1);
 
@@ -1400,11 +1426,776 @@ app.get('/api/dashboard/overview', requireAuth, async (req, res) => {
   }
 });
 
+/* ============================================================================
+ * CRUD completion layer — Update / Delete for every entity (Phase 1)
+ * ==========================================================================*/
+
+const EXECUTION_STATUSES = ['Not Executed', 'Passed', 'Failed', 'Retest', 'Blocked', 'Skipped'];
+
+async function updateRow(tableName, columnMap, body, id) {
+  const sets = [];
+  const values = [];
+  for (const [apiKey, column] of Object.entries(columnMap)) {
+    if (body[apiKey] !== undefined) {
+      values.push(body[apiKey]);
+      sets.push(`${column} = $${values.length}`);
+    }
+  }
+  if (!sets.length) return { row: null, empty: true };
+  values.push(id);
+  const result = await pool.query(
+    `UPDATE ${tableName} SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`,
+    values
+  );
+  return { row: result.rows[0] || null, empty: false };
+}
+
+const PROJECT_COLUMNS = { name: 'name', keyCode: 'key_code', description: 'description', status: 'status', ownerId: 'owner_id' };
+const REQUIREMENT_COLUMNS = {
+  projectId: 'project_id', title: 'title', description: 'description', status: 'status',
+  priority: 'priority', source: 'source', userStory: 'user_story', acceptanceCriteria: 'acceptance_criteria',
+};
+const TEST_CASE_COLUMNS = {
+  projectId: 'project_id', code: 'code', title: 'title', summary: 'summary', status: 'status',
+  severity: 'severity', priority: 'priority', assigneeId: 'assignee_id', tags: 'tags',
+  steps: 'steps', expectedResult: 'expected_result', actualResult: 'actual_result',
+  modulFitur: 'modul_fitur', userStoryCoverage: 'user_story_coverage', tipeTest: 'tipe_test',
+  userRole: 'user_role', tujuanPengujian: 'tujuan_pengujian', langkahUji: 'langkah_uji',
+  validasiDataUji: 'validasi_data_uji', hasilYangDiharapkan: 'hasil_yang_diharapkan',
+  picQA: 'pic_qa', statusSIT: 'status_sit', dateSITExecuted: 'date_sit_executed',
+  dateSITDone: 'date_sit_done', objectTestVersion: 'object_test_version', apiVersion: 'api_version',
+  testScenarioVersion: 'test_scenario_version', requirementId: 'requirement_id',
+  suiteId: 'suite_id', milestoneId: 'milestone_id', reviewStatus: 'review_status',
+  preconditions: 'preconditions',
+};
+const TEST_CYCLE_COLUMNS = { projectId: 'project_id', name: 'name', status: 'status', ownerId: 'owner_id', summary: 'summary', planId: 'plan_id' };
+const TEST_RUN_COLUMNS = { projectId: 'project_id', name: 'name', status: 'status', summary: 'summary' };
+const DEFECT_COLUMNS = {
+  projectId: 'project_id', title: 'title', description: 'description', severity: 'severity',
+  priority: 'priority', status: 'status', assigneeId: 'assignee_id', linkedTestCaseId: 'linked_test_case_id',
+  linkedCycleId: 'linked_cycle_id', linkedRunId: 'linked_run_id', environment: 'environment',
+  stepsToReproduce: 'steps_to_reproduce', resolution: 'resolution',
+};
+
+function registerUpdateDelete(path, table, columns, roles, beforeDelete = null) {
+  app.put(`/api/${path}/:id`, requireAuth, requireRoles(...roles), async (req, res) => {
+    try {
+      const { row, empty } = await updateRow(table, columns, req.body || {}, req.params.id);
+      if (empty) return res.status(400).json({ message: 'No fields provided to update.' });
+      if (!row) return res.status(404).json({ message: `Record not found in ${table}.` });
+      await logActivity(req.user.sub, table, row.id, 'update', Object.keys(req.body || {}).join(', '));
+      res.json({ record: row });
+    } catch (error) {
+      res.status(500).json({ message: error.message || `Unable to update ${table}.` });
+    }
+  });
+
+  app.delete(`/api/${path}/:id`, requireAuth, requireRoles(...roles), async (req, res) => {
+    try {
+      if (beforeDelete) await beforeDelete(req.params.id);
+      const result = await pool.query(`DELETE FROM ${table} WHERE id = $1 RETURNING id`, [req.params.id]);
+      if (result.rowCount === 0) return res.status(404).json({ message: `Record not found in ${table}.` });
+      res.json({ deleted: true, id: Number(req.params.id) });
+    } catch (error) {
+      if (error.code === '23503') {
+        return res.status(409).json({ message: 'Cannot delete: other records still reference this item.' });
+      }
+      res.status(500).json({ message: error.message || `Unable to delete from ${table}.` });
+    }
+  });
+}
+
+registerUpdateDelete('projects', 'projects', PROJECT_COLUMNS, ['qa_lead', 'pm']);
+registerUpdateDelete('requirements', 'requirements', REQUIREMENT_COLUMNS, ['qa_lead', 'pm', 'product', 'business_analyst'], async (id) => {
+  await pool.query('UPDATE test_cases SET requirement_id = NULL WHERE requirement_id = $1', [id]);
+});
+registerUpdateDelete('test-cases', 'test_cases', TEST_CASE_COLUMNS, ['qa_lead', 'qa_engineer', 'pm', 'product'], async (id) => {
+  await pool.query('UPDATE defects SET linked_test_case_id = NULL WHERE linked_test_case_id = $1', [id]);
+});
+registerUpdateDelete('test-cycles', 'test_cycles', TEST_CYCLE_COLUMNS, ['qa_lead', 'pm'], async (id) => {
+  await pool.query('UPDATE defects SET linked_cycle_id = NULL WHERE linked_cycle_id = $1', [id]);
+});
+registerUpdateDelete('test-runs', 'test_runs', TEST_RUN_COLUMNS, ['qa_lead', 'qa_engineer', 'pm'], async (id) => {
+  await pool.query('UPDATE defects SET linked_run_id = NULL WHERE linked_run_id = $1', [id]);
+});
+registerUpdateDelete('defects', 'defects', DEFECT_COLUMNS, ['qa_lead', 'qa_engineer']);
+
+/* ============================================================================
+ * Phase 2 — Test suites, milestones, test plans & requirement traceability
+ * ==========================================================================*/
+
+const SUITE_COLUMNS = { projectId: 'project_id', parentId: 'parent_id', name: 'name', description: 'description' };
+const MILESTONE_COLUMNS = { projectId: 'project_id', name: 'name', description: 'description', status: 'status', dueDate: 'due_date' };
+const PLAN_COLUMNS = { projectId: 'project_id', milestoneId: 'milestone_id', name: 'name', description: 'description', status: 'status' };
+
+registerUpdateDelete('suites', 'test_suites', SUITE_COLUMNS, ['qa_lead', 'qa_engineer', 'pm', 'product']);
+registerUpdateDelete('milestones', 'milestones', MILESTONE_COLUMNS, ['qa_lead', 'pm', 'product']);
+registerUpdateDelete('test-plans', 'test_plans', PLAN_COLUMNS, ['qa_lead', 'pm', 'product']);
+
+async function logActivity(actorId, entityType, entityId, action, detail) {
+  try {
+    await pool.query(
+      'INSERT INTO activity_log (actor_id, entity_type, entity_id, action, detail) VALUES ($1,$2,$3,$4,$5)',
+      [actorId || null, entityType, entityId || null, action, detail || '']
+    );
+  } catch (_e) { /* activity logging must never break the request */ }
+}
+
+app.get('/api/suites', requireAuth, async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const params = [];
+    let where = '';
+    if (projectId) { where = 'WHERE s.project_id = $1'; params.push(projectId); }
+    const result = await pool.query(`
+      SELECT s.*, p.name AS project_name, ps.name AS parent_name,
+             (SELECT COUNT(*) FROM test_cases tc WHERE tc.suite_id = s.id) AS case_count
+      FROM test_suites s
+      LEFT JOIN projects p ON p.id = s.project_id
+      LEFT JOIN test_suites ps ON ps.id = s.parent_id
+      ${where}
+      ORDER BY s.name ASC
+    `, params);
+    res.json({ suites: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch test suites.' });
+  }
+});
+
+app.post('/api/suites', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm', 'product'), async (req, res) => {
+  const { projectId, name, parentId, description } = req.body || {};
+  if (!projectId || !name) return res.status(400).json({ message: 'Project and suite name are required.' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO test_suites (project_id, name, parent_id, description) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [projectId, name, parentId || null, description || '']
+    );
+    await logActivity(req.user.sub, 'suite', result.rows[0].id, 'create', `Created suite ${name}`);
+    res.status(201).json({ suite: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to create test suite.' });
+  }
+});
+
+app.get('/api/milestones', requireAuth, async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const params = [];
+    let where = '';
+    if (projectId) { where = 'WHERE m.project_id = $1'; params.push(projectId); }
+    const result = await pool.query(`
+      SELECT m.*, p.name AS project_name,
+             (SELECT COUNT(*) FROM test_cases tc WHERE tc.milestone_id = m.id) AS case_count
+      FROM milestones m
+      LEFT JOIN projects p ON p.id = m.project_id
+      ${where}
+      ORDER BY m.due_date ASC NULLS LAST, m.name ASC
+    `, params);
+    res.json({ milestones: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch milestones.' });
+  }
+});
+
+app.post('/api/milestones', requireAuth, requireRoles('qa_lead', 'pm', 'product'), async (req, res) => {
+  const { projectId, name, description, status = 'Open', dueDate } = req.body || {};
+  if (!projectId || !name) return res.status(400).json({ message: 'Project and milestone name are required.' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO milestones (project_id, name, description, status, due_date) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [projectId, name, description || '', status, dueDate || null]
+    );
+    await logActivity(req.user.sub, 'milestone', result.rows[0].id, 'create', `Created milestone ${name}`);
+    res.status(201).json({ milestone: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to create milestone.' });
+  }
+});
+
+app.get('/api/test-plans', requireAuth, async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const params = [];
+    let where = '';
+    if (projectId) { where = 'WHERE tp.project_id = $1'; params.push(projectId); }
+    const result = await pool.query(`
+      SELECT tp.*, p.name AS project_name, m.name AS milestone_name,
+             (SELECT COUNT(*) FROM test_cycles c WHERE c.plan_id = tp.id) AS cycle_count
+      FROM test_plans tp
+      LEFT JOIN projects p ON p.id = tp.project_id
+      LEFT JOIN milestones m ON m.id = tp.milestone_id
+      ${where}
+      ORDER BY tp.updated_at DESC
+    `, params);
+    res.json({ plans: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch test plans.' });
+  }
+});
+
+app.post('/api/test-plans', requireAuth, requireRoles('qa_lead', 'pm', 'product'), async (req, res) => {
+  const { projectId, name, description, status = 'Draft', milestoneId } = req.body || {};
+  if (!projectId || !name) return res.status(400).json({ message: 'Project and plan name are required.' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO test_plans (project_id, name, description, status, milestone_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [projectId, name, description || '', status, milestoneId || null]
+    );
+    await logActivity(req.user.sub, 'test_plan', result.rows[0].id, 'create', `Created test plan ${name}`);
+    res.status(201).json({ plan: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to create test plan.' });
+  }
+});
+
+app.get('/api/traceability', requireAuth, async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const reqParams = [];
+    const caseParams = [];
+    const reqWhere = projectId ? 'WHERE r.project_id = $1' : '';
+    const caseWhere = projectId ? 'WHERE tc.project_id = $1' : '';
+    if (projectId) { reqParams.push(projectId); caseParams.push(projectId); }
+
+    const requirements = await pool.query(`
+      SELECT r.id, r.title, r.status, r.priority, r.project_id, p.name AS project_name,
+        (SELECT COUNT(*) FROM test_cases tc WHERE tc.requirement_id = r.id) AS case_count,
+        (SELECT COUNT(*) FROM test_cases tc WHERE tc.requirement_id = r.id AND tc.review_status = 'Approved') AS approved_count,
+        (SELECT COUNT(*) FROM test_cases tc WHERE tc.requirement_id = r.id AND tc.status = 'Passed') AS passed_count
+      FROM requirements r
+      LEFT JOIN projects p ON p.id = r.project_id
+      ${reqWhere}
+      ORDER BY r.updated_at DESC
+    `, reqParams);
+
+    const testCases = await pool.query(`
+      SELECT tc.id, tc.code, tc.title, tc.requirement_id, tc.status, tc.review_status, tc.severity,
+             tc.tipe_test, tc.modul_fitur, tc.suite_id, p.name AS project_name
+      FROM test_cases tc
+      LEFT JOIN projects p ON p.id = tc.project_id
+      ${caseWhere}
+      ORDER BY tc.code ASC
+    `, caseParams);
+
+    const linked = {};
+    testCases.rows.forEach((tc) => {
+      if (!tc.requirement_id) return;
+      linked[tc.requirement_id] = linked[tc.requirement_id] || [];
+      linked[tc.requirement_id].push(tc);
+    });
+
+    const rows = requirements.rows.map((r) => {
+      const cases = linked[r.id] || [];
+      const coverage = cases.length ? Math.round((Number(r.passed_count) / cases.length) * 100) : 0;
+      return { ...r, coverage_percent: coverage, testCases: cases };
+    });
+
+    const uncovered = testCases.rows.filter((tc) => !tc.requirement_id);
+
+    res.json({
+      traceability: rows,
+      uncoveredCases: uncovered,
+      summary: {
+        totalRequirements: requirements.rowCount,
+        coveredRequirements: rows.filter((r) => Number(r.case_count) > 0).length,
+        totalCases: testCases.rowCount,
+        uncoveredCases: uncovered.length,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to build traceability matrix.' });
+  }
+});
+
+/* ============================================================================
+ * Phase 3 — Structured steps, shared steps, versioning, clone, bulk edit,
+ *           review workflow, attachments & tags
+ * ==========================================================================*/
+
+const REVIEW_STATUSES = ['Draft', 'In Review', 'Approved', 'Rejected', 'Deprecated'];
+
+app.get('/api/shared-steps', requireAuth, async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const result = await pool.query(
+      `SELECT * FROM shared_steps ${projectId ? 'WHERE project_id = $1' : ''} ORDER BY title ASC`,
+      projectId ? [projectId] : []
+    );
+    res.json({ sharedSteps: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch shared steps.' });
+  }
+});
+
+app.post('/api/shared-steps', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm'), async (req, res) => {
+  const { projectId, title, action, expectedResult } = req.body || {};
+  if (!projectId || !title) return res.status(400).json({ message: 'Project and title are required.' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO shared_steps (project_id, title, action, expected_result) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [projectId, title, action || '', expectedResult || '']
+    );
+    res.status(201).json({ sharedStep: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to create shared step.' });
+  }
+});
+
+app.get('/api/test-cases/:id/steps', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM test_case_steps WHERE test_case_id = $1 ORDER BY step_no ASC',
+      [req.params.id]
+    );
+    res.json({ steps: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch test case steps.' });
+  }
+});
+
+app.put('/api/test-cases/:id/steps', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm', 'product'), async (req, res) => {
+  const { steps = [] } = req.body || {};
+  if (!Array.isArray(steps)) return res.status(400).json({ message: 'Steps must be an array.' });
+  try {
+    await pool.query('DELETE FROM test_case_steps WHERE test_case_id = $1', [req.params.id]);
+    const created = [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i] || {};
+      const row = await pool.query(
+        `INSERT INTO test_case_steps (test_case_id, step_no, action, expected_result, test_data)
+         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [req.params.id, i + 1, step.action || '', step.expectedResult || '', step.testData || '']
+      );
+      created.push(row.rows[0]);
+    }
+    // Keep the denormalised text column in sync for the 18-column export.
+    const text = created.map((s) => `${s.step_no}. ${s.action}`).join('\n');
+    await pool.query('UPDATE test_cases SET langkah_uji = $1, steps = $1, updated_at = NOW() WHERE id = $2', [text, req.params.id]);
+    await logActivity(req.user.sub, 'test_case', req.params.id, 'update_steps', `${created.length} step(s)`);
+    res.json({ steps: created });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to save test case steps.' });
+  }
+});
+
+app.get('/api/test-cases/:id/versions', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT v.*, u.name AS changed_by_name
+      FROM test_case_versions v
+      LEFT JOIN users u ON u.id = v.changed_by
+      WHERE v.test_case_id = $1
+      ORDER BY v.version_no DESC
+    `, [req.params.id]);
+    res.json({ versions: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch version history.' });
+  }
+});
+
+app.post('/api/test-cases/:id/review', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm', 'product'), async (req, res) => {
+  const { reviewStatus, changeSummary } = req.body || {};
+  if (!reviewStatus || !REVIEW_STATUSES.includes(reviewStatus)) {
+    return res.status(400).json({ message: 'A valid review status is required.' });
+  }
+  if (['Approved', 'Rejected'].includes(reviewStatus) && !['qa_lead', 'pm', 'product'].includes(req.user.role)) {
+    return res.status(403).json({ message: 'Only QA Lead, PM, or Product can approve or reject test cases.' });
+  }
+  try {
+    const current = await pool.query('SELECT * FROM test_cases WHERE id = $1', [req.params.id]);
+    if (current.rowCount === 0) return res.status(404).json({ message: 'Test case not found.' });
+    const nextVersion = (current.rows[0].version_no || 1) + (reviewStatus === 'Approved' ? 1 : 0);
+
+    const result = await pool.query(
+      `UPDATE test_cases
+       SET review_status = $1::text,
+           approved_by = CASE WHEN $1::text = 'Approved' THEN $2 ELSE approved_by END,
+           version_no = $3,
+           updated_at = NOW()
+       WHERE id = $4 RETURNING *`,
+      [reviewStatus, req.user.sub, nextVersion, req.params.id]
+    );
+
+    await pool.query(
+      `INSERT INTO test_case_versions (test_case_id, version_no, snapshot, change_summary, changed_by)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [req.params.id, nextVersion, JSON.stringify(result.rows[0]), changeSummary || `Review status set to ${reviewStatus}`, req.user.sub]
+    );
+    await logActivity(req.user.sub, 'test_case', req.params.id, 'review', reviewStatus);
+    res.json({ testCase: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to update review status.' });
+  }
+});
+
+app.post('/api/test-cases/:id/clone', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm', 'product'), async (req, res) => {
+  try {
+    const source = await pool.query('SELECT * FROM test_cases WHERE id = $1', [req.params.id]);
+    if (source.rowCount === 0) return res.status(404).json({ message: 'Test case not found.' });
+    const tc = source.rows[0];
+    const suffix = Date.now().toString().slice(-4);
+    const newCode = `${tc.code}-C${suffix}`;
+
+    const result = await pool.query(
+      `INSERT INTO test_cases (
+        project_id, code, title, summary, status, severity, priority, assignee_id, creator_id,
+        steps, expected_result, tags, modul_fitur, user_story_coverage, tipe_test, user_role,
+        tujuan_pengujian, langkah_uji, validasi_data_uji, hasil_yang_diharapkan, pic_qa, status_sit,
+        object_test_version, api_version, test_scenario_version, requirement_id, suite_id, milestone_id,
+        review_status, preconditions
+      )
+      SELECT project_id, $2, title, summary, 'Draft', severity, priority, assignee_id, $3,
+        steps, expected_result, tags, modul_fitur, user_story_coverage, tipe_test, user_role,
+        tujuan_pengujian, langkah_uji, validasi_data_uji, hasil_yang_diharapkan, pic_qa, status_sit,
+        object_test_version, api_version, test_scenario_version, requirement_id, suite_id, milestone_id,
+        'Draft', preconditions
+      FROM test_cases WHERE id = $1
+      RETURNING *`,
+      [req.params.id, newCode, req.user.sub]
+    );
+
+    const cloneId = result.rows[0].id;
+    const steps = await pool.query('SELECT step_no, action, expected_result, test_data FROM test_case_steps WHERE test_case_id = $1', [req.params.id]);
+    for (const s of steps.rows) {
+      await pool.query(
+        `INSERT INTO test_case_steps (test_case_id, step_no, action, expected_result, test_data) VALUES ($1,$2,$3,$4,$5)`,
+        [cloneId, s.step_no, s.action, s.expected_result, s.test_data]
+      );
+    }
+    await logActivity(req.user.sub, 'test_case', cloneId, 'clone', `Cloned from ${tc.code}`);
+    res.status(201).json({ testCase: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to clone test case.' });
+  }
+});
+
+app.patch('/api/test-cases/bulk', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm', 'product'), async (req, res) => {
+  const { ids = [], patch = {} } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: 'Select at least one test case.' });
+  const allowed = ['status', 'severity', 'priority', 'assigneeId', 'tipeTest', 'statusSIT', 'suiteId', 'milestoneId', 'reviewStatus', 'picQA', 'objectTestVersion', 'apiVersion', 'testScenarioVersion'];
+  const sets = [];
+  const values = [];
+  for (const key of allowed) {
+    if (patch[key] === undefined) continue;
+    const column = TEST_CASE_COLUMNS[key];
+    if (!column) continue;
+    values.push(patch[key]);
+    sets.push(`${column} = $${values.length}`);
+  }
+  if (!sets.length) return res.status(400).json({ message: 'No supported fields provided for bulk edit.' });
+  values.push(ids);
+  try {
+    const result = await pool.query(
+      `UPDATE test_cases SET ${sets.join(', ')}, updated_at = NOW() WHERE id = ANY($${values.length}::int[]) RETURNING *`,
+      values
+    );
+    await logActivity(req.user.sub, 'test_case', null, 'bulk_update', `${result.rowCount} case(s)`);
+    res.json({ updated: result.rowCount, testCases: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to bulk edit test cases.' });
+  }
+});
+
+app.get('/api/tags', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT tags FROM test_cases WHERE tags IS NOT NULL AND tags <> ''`);
+    const tagSet = new Set();
+    result.rows.forEach((row) => {
+      String(row.tags).split(',').map((t) => t.trim()).filter(Boolean).forEach((t) => tagSet.add(t));
+    });
+    res.json({ tags: Array.from(tagSet).sort() });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch tags.' });
+  }
+});
+
+app.get('/api/attachments', requireAuth, async (req, res) => {
+  try {
+    const { entityType, entityId } = req.query;
+    if (!entityType || !entityId) return res.status(400).json({ message: 'entityType and entityId are required.' });
+    const result = await pool.query(`
+      SELECT a.*, u.name AS uploaded_by_name
+      FROM attachments a
+      LEFT JOIN users u ON u.id = a.uploaded_by
+      WHERE a.entity_type = $1 AND a.entity_id = $2
+      ORDER BY a.created_at DESC
+    `, [entityType, entityId]);
+    res.json({ attachments: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch attachments.' });
+  }
+});
+
+app.post('/api/attachments', requireAuth, uploadAny.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'A file is required.' });
+    const { entityType, entityId } = req.body || {};
+    if (!entityType || !entityId) return res.status(400).json({ message: 'entityType and entityId are required.' });
+    const result = await pool.query(
+      `INSERT INTO attachments (entity_type, entity_id, file_name, file_path, file_size, mime_type, uploaded_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [entityType, entityId, req.file.originalname, req.file.path, req.file.size, req.file.mimetype, req.user.sub]
+    );
+    await logActivity(req.user.sub, entityType, entityId, 'attach', req.file.originalname);
+    res.status(201).json({ attachment: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to upload attachment.' });
+  }
+});
+
+app.get('/api/attachments/:id/download', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM attachments WHERE id = $1', [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Attachment not found.' });
+    const file = result.rows[0];
+    if (!file.file_path || !fs.existsSync(file.file_path)) {
+      return res.status(404).json({ message: 'Attachment file is not available on disk.' });
+    }
+    return res.download(file.file_path, file.file_name);
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to download attachment.' });
+  }
+});
+
+app.delete('/api/attachments/:id', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM attachments WHERE id = $1 RETURNING *', [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Attachment not found.' });
+    const file = result.rows[0];
+    if (file.file_path && fs.existsSync(file.file_path)) {
+      try { fs.unlinkSync(file.file_path); } catch (_e) {}
+    }
+    res.json({ deleted: true });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to delete attachment.' });
+  }
+});
+
+/* ============================================================================
+ * Phase 4 — Execution results, defect linkage, coverage & trend reporting,
+ *           activity feed
+ * ==========================================================================*/
+
+app.get('/api/test-runs/:id/results', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT trr.*, tc.code, tc.title, tc.severity, tc.priority, u.name AS assignee_name
+      FROM test_run_results trr
+      LEFT JOIN test_cases tc ON tc.id = trr.test_case_id
+      LEFT JOIN users u ON u.id = trr.assignee_id
+      WHERE trr.run_id = $1
+      ORDER BY trr.id ASC
+    `, [req.params.id]);
+    res.json({ results: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch run results.' });
+  }
+});
+
+app.patch('/api/test-runs/:runId/results/:resultId', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm'), async (req, res) => {
+  const { status, notes, elapsedMinutes, environment, evidenceUrl, assigneeId } = req.body || {};
+  const allowedStatuses = ['Not Run', 'Passed', 'Failed', 'Blocked', 'Retest', 'Skipped'];
+  if (status && !allowedStatuses.includes(status)) {
+    return res.status(400).json({ message: 'Invalid run result status.' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE test_run_results
+       SET status = COALESCE($1, status),
+           notes = COALESCE($2, notes),
+           elapsed_minutes = COALESCE($3, elapsed_minutes),
+           environment = COALESCE($4, environment),
+           evidence_url = COALESCE($5, evidence_url),
+           assignee_id = COALESCE($6, assignee_id),
+           executed_at = CASE WHEN $1 IS NOT NULL THEN NOW() ELSE executed_at END
+       WHERE id = $7 AND run_id = $8
+       RETURNING *`,
+      [status || null, notes ?? null, elapsedMinutes ?? null, environment ?? null, evidenceUrl ?? null, assigneeId || null, req.params.resultId, req.params.runId]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Run result not found.' });
+    await logActivity(req.user.sub, 'test_run_result', req.params.resultId, 'execute', status || 'updated');
+    res.json({ result: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to update run result.' });
+  }
+});
+
+app.post('/api/executions/:id/create-defect', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm'), async (req, res) => {
+  try {
+    const exec = await pool.query(`
+      SELECT cc.*, tc.title AS case_title, tc.code AS case_code, cyc.project_id, cyc.id AS cycle_id
+      FROM cycle_cases cc
+      LEFT JOIN test_cases tc ON tc.id = cc.test_case_id
+      LEFT JOIN test_cycles cyc ON cyc.id = cc.cycle_id
+      WHERE cc.id = $1
+    `, [req.params.id]);
+    if (exec.rowCount === 0) return res.status(404).json({ message: 'Execution record not found.' });
+    const row = exec.rows[0];
+    const { title, description, severity = 'Major', priority = 'Medium', environment = 'SIT', stepsToReproduce } = req.body || {};
+
+    const defect = await pool.query(
+      `INSERT INTO defects (project_id, title, description, severity, priority, status, assignee_id, reporter_id, linked_test_case_id, linked_cycle_id, environment, steps_to_reproduce)
+       VALUES ($1,$2,$3,$4,$5,'Open',$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [row.project_id, title || `Defect from failed execution ${row.case_code || row.id}`, description || '', severity, priority,
+        null, req.user.sub, row.test_case_id, row.cycle_id, environment, stepsToReproduce || '']
+    );
+    await logActivity(req.user.sub, 'defect', defect.rows[0].id, 'create_from_execution', row.case_code || String(row.id));
+    res.status(201).json({ defect: defect.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to create defect from execution.' });
+  }
+});
+
+app.get('/api/reports/coverage', requireAuth, async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const params = projectId ? [projectId] : [];
+    const where = projectId ? 'WHERE tc.project_id = $1' : '';
+
+    const bySuite = await pool.query(`
+      SELECT COALESCE(s.name, 'Unassigned') AS suite_name, s.id AS suite_id,
+             COUNT(tc.id)::int AS total,
+             COUNT(*) FILTER (WHERE tc.review_status = 'Approved')::int AS approved,
+             COUNT(*) FILTER (WHERE tc.status = 'Passed')::int AS passed,
+             COUNT(*) FILTER (WHERE tc.status = 'Failed')::int AS failed
+      FROM test_cases tc
+      LEFT JOIN test_suites s ON s.id = tc.suite_id
+      ${where}
+      GROUP BY s.id, s.name
+      ORDER BY total DESC
+    `, params);
+
+    const byMilestone = await pool.query(`
+      SELECT COALESCE(m.name, 'No milestone') AS milestone_name, m.due_date,
+             COUNT(tc.id)::int AS total,
+             COUNT(*) FILTER (WHERE tc.status = 'Passed')::int AS passed,
+             COUNT(*) FILTER (WHERE tc.status = 'Failed')::int AS failed
+      FROM test_cases tc
+      LEFT JOIN milestones m ON m.id = tc.milestone_id
+      ${where}
+      GROUP BY m.id, m.name, m.due_date
+      ORDER BY total DESC
+    `, params);
+
+    const byModule = await pool.query(`
+      SELECT COALESCE(tc.modul_fitur, 'Unassigned') AS modul_fitur,
+             COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE tc.status = 'Passed')::int AS passed,
+             COUNT(*) FILTER (WHERE tc.status = 'Failed')::int AS failed
+      FROM test_cases tc
+      ${where}
+      GROUP BY tc.modul_fitur
+      ORDER BY total DESC
+    `, params);
+
+    res.json({ bySuite: bySuite.rows, byMilestone: byMilestone.rows, byModule: byModule.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to build coverage report.' });
+  }
+});
+
+app.get('/api/reports/trend', requireAuth, async (req, res) => {
+  try {
+    const runs = await pool.query(`
+      SELECT DATE(tr.created_at) AS day,
+             COUNT(DISTINCT tr.id)::int AS runs,
+             COUNT(trr.id) FILTER (WHERE trr.status = 'Passed')::int AS passed,
+             COUNT(trr.id) FILTER (WHERE trr.status = 'Failed')::int AS failed,
+             COUNT(trr.id) FILTER (WHERE trr.status IN ('Blocked','Retest'))::int AS blocked
+      FROM test_runs tr
+      LEFT JOIN test_run_results trr ON trr.run_id = tr.id
+      GROUP BY DATE(tr.created_at)
+      ORDER BY day ASC
+      LIMIT 30
+    `);
+
+    const executions = await pool.query(`
+      SELECT DATE(cc.executed_at) AS day,
+             COUNT(*) FILTER (WHERE cc.status = 'Passed')::int AS passed,
+             COUNT(*) FILTER (WHERE cc.status = 'Failed')::int AS failed
+      FROM cycle_cases cc
+      WHERE cc.executed_at IS NOT NULL
+      GROUP BY DATE(cc.executed_at)
+      ORDER BY day ASC
+      LIMIT 30
+    `);
+
+    res.json({ runsTrend: runs.rows, executionTrend: executions.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to build trend report.' });
+  }
+});
+
+app.get('/api/activity', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 40, 200);
+    const result = await pool.query(`
+      SELECT a.*, u.name AS actor_name, u.avatar AS actor_avatar
+      FROM activity_log a
+      LEFT JOIN users u ON u.id = a.actor_id
+      ORDER BY a.created_at DESC
+      LIMIT $1
+    `, [limit]);
+    res.json({ activity: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch activity log.' });
+  }
+});
+
+app.patch('/api/executions/:id', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm'), async (req, res) => {
+  const { status, notes, assigneeId } = req.body || {};
+  if (status && !EXECUTION_STATUSES.includes(status)) {
+    return res.status(400).json({ message: 'Invalid execution status.' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE cycle_cases
+       SET status = COALESCE($1, status),
+           notes = COALESCE($2, notes),
+           assignee_id = COALESCE($3, assignee_id),
+           executed_at = CASE WHEN $1 IS NOT NULL THEN NOW() ELSE executed_at END
+       WHERE id = $4
+       RETURNING *`,
+      [status || null, notes ?? null, assigneeId || null, req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Execution record not found.' });
+    res.json({ execution: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to update execution.' });
+  }
+});
+
+app.post('/api/test-cycles/:id/cases', requireAuth, requireRoles('qa_lead', 'qa_engineer', 'pm'), async (req, res) => {
+  const { testCaseIds = [] } = req.body || {};
+  if (!Array.isArray(testCaseIds) || testCaseIds.length === 0) {
+    return res.status(400).json({ message: 'At least one test case is required.' });
+  }
+  try {
+    const inserted = [];
+    for (const testCaseId of testCaseIds) {
+      const existing = await pool.query(
+        'SELECT id FROM cycle_cases WHERE cycle_id = $1 AND test_case_id = $2',
+        [req.params.id, testCaseId]
+      );
+      if (existing.rowCount > 0) continue;
+      const row = await pool.query(
+        `INSERT INTO cycle_cases (cycle_id, test_case_id, status, assignee_id)
+         VALUES ($1, $2, 'Not Executed', $3) RETURNING *`,
+        [req.params.id, testCaseId, req.user.sub]
+      );
+      inserted.push(row.rows[0]);
+    }
+    res.status(201).json({ added: inserted.length, executions: inserted });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to add test cases to cycle.' });
+  }
+});
+
 async function startServer() {
   await initializeDatabase();
 
   app.listen(config.port, () => {
-    console.log(`TCMS API listening on port ${config.port}`);
+    console.log(`BINA QA TCMS API listening on port ${config.port}`);
   });
 }
 

@@ -1,8 +1,8 @@
-# Bank Ina Digital QA TCMS - User Guide
+# BINA QA TCMS - User Guide
 
 **Document Version**: 1.0  
 **Last Updated**: 2026-09-22  
-**Application**: Bank Ina Digital Test Case Management System (TCMS)
+**Application**: BINA QA Test Case Management System (TCMS)
 
 ---
 
@@ -31,7 +31,7 @@
 
 ### 1.1 System Overview
 
-The Bank Ina Digital TCMS (Test Case Management System) is an enterprise-grade platform for managing quality assurance operations. It provides Jira/Xray-style capabilities including:
+The BINA QA TCMS (Test Case Management System) is an enterprise-grade platform for managing quality assurance operations. It provides Jira/Xray-style capabilities including:
 
 - Requirement traceability with RAG-based PDF analysis
 - Test case management with 18-column standard template

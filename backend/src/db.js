@@ -170,6 +170,90 @@ export async function initializeDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS test_suites (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+      parent_id INTEGER REFERENCES test_suites(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS milestones (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      status VARCHAR(50) DEFAULT 'Open',
+      due_date DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS test_plans (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+      milestone_id INTEGER REFERENCES milestones(id) ON DELETE SET NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      status VARCHAR(50) DEFAULT 'Draft',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS test_case_steps (
+      id SERIAL PRIMARY KEY,
+      test_case_id INTEGER REFERENCES test_cases(id) ON DELETE CASCADE,
+      step_no INTEGER NOT NULL DEFAULT 1,
+      action TEXT,
+      expected_result TEXT,
+      test_data TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS shared_steps (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+      title VARCHAR(255) NOT NULL,
+      action TEXT,
+      expected_result TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS test_case_versions (
+      id SERIAL PRIMARY KEY,
+      test_case_id INTEGER REFERENCES test_cases(id) ON DELETE CASCADE,
+      version_no INTEGER NOT NULL DEFAULT 1,
+      snapshot JSONB,
+      change_summary TEXT,
+      changed_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id SERIAL PRIMARY KEY,
+      entity_type VARCHAR(50) NOT NULL,
+      entity_id INTEGER NOT NULL,
+      file_name VARCHAR(500) NOT NULL,
+      file_path VARCHAR(1000),
+      file_size INTEGER,
+      mime_type VARCHAR(200),
+      uploaded_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id SERIAL PRIMARY KEY,
+      actor_id INTEGER REFERENCES users(id),
+      entity_type VARCHAR(50) NOT NULL,
+      entity_id INTEGER,
+      action VARCHAR(50) NOT NULL,
+      detail TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
 
   const tcColumns = [
@@ -189,6 +273,12 @@ export async function initializeDatabase() {
     ['api_version', 'VARCHAR(100)'],
     ['test_scenario_version', 'VARCHAR(100)'],
     ['requirement_id', 'INTEGER REFERENCES requirements(id)'],
+    ['suite_id', 'INTEGER REFERENCES test_suites(id) ON DELETE SET NULL'],
+    ['milestone_id', 'INTEGER REFERENCES milestones(id) ON DELETE SET NULL'],
+    ['review_status', "VARCHAR(50) DEFAULT 'Draft'"],
+    ['approved_by', 'INTEGER REFERENCES users(id)'],
+    ['version_no', 'INTEGER DEFAULT 1'],
+    ['preconditions', 'TEXT'],
   ];
   for (const [col, type] of tcColumns) {
     try {
@@ -208,10 +298,22 @@ export async function initializeDatabase() {
   const cyColumns = [
     ['estimated_minutes', 'INTEGER'],
     ['actual_minutes', 'INTEGER'],
+    ['plan_id', 'INTEGER REFERENCES test_plans(id) ON DELETE SET NULL'],
   ];
   for (const [col, type] of cyColumns) {
     try {
       await pool.query(`ALTER TABLE test_cycles ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+
+  const trrColumns = [
+    ['elapsed_minutes', 'INTEGER'],
+    ['environment', 'VARCHAR(200)'],
+    ['evidence_url', 'VARCHAR(1000)'],
+  ];
+  for (const [col, type] of trrColumns) {
+    try {
+      await pool.query(`ALTER TABLE test_run_results ADD COLUMN IF NOT EXISTS ${col} ${type}`);
     } catch (_e) {}
   }
 
@@ -222,6 +324,8 @@ export async function initializeDatabase() {
     ['linked_run_id', 'INTEGER REFERENCES test_runs(id)'],
     ['environment', 'VARCHAR(200)'],
     ['steps_to_reproduce', 'TEXT'],
+    ['resolution', 'TEXT'],
+    ['verified_by', 'INTEGER REFERENCES users(id)'],
   ];
   for (const [col, type] of defectColumns) {
     try {
