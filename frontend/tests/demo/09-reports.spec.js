@@ -18,7 +18,7 @@ test.describe('VIDEO 09 - Reports & Analytics Demo', () => {
   });
 
   test('09b - report sub tabs showcase', async ({ page }) => {
-    const tabs = ['Summary', 'Distribution', 'Traceability', 'Estimate'];
+    const tabs = ['Summary', 'Distribution', 'Traceability', 'Coverage', 'Trend', 'Estimate'];
     for (const tab of tabs) {
       const btn = reportsTab(page, tab);
       if (await btn.isVisible()) {
@@ -109,6 +109,40 @@ test.describe('VIDEO 09 - Reports & Analytics Demo', () => {
       if (await lbl.count() > 0) {
         await lbl.first().scrollIntoViewIfNeeded();
         await page.waitForTimeout(400);
+      }
+    }
+    await page.waitForTimeout(2500);
+  });
+
+  test('09h - coverage by suite / milestone / module (coverage tab)', async ({ page }) => {
+    await reportsTab(page, 'Coverage').click();
+    await page.waitForTimeout(1800);
+
+    const titles = ['Coverage by Test Suite', 'Coverage by Milestone', 'Coverage by Module'];
+    for (const t of titles) {
+      const head = page.getByRole('heading', { name: t }).first();
+      if (await head.isVisible().catch(() => false)) {
+        await head.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(800);
+      }
+    }
+
+    if (await page.locator('.coverage-bar').first().isVisible().catch(() => false)) {
+      await page.locator('.coverage-bar').first().scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1500);
+    }
+    await page.waitForTimeout(2500);
+  });
+
+  test('09i - run & execution trend (trend tab)', async ({ page }) => {
+    await reportsTab(page, 'Trend').click();
+    await page.waitForTimeout(1800);
+
+    for (const t of ['Run Creation Trend', 'Execution Trend']) {
+      const head = page.getByRole('heading', { name: t }).first();
+      if (await head.isVisible().catch(() => false)) {
+        await head.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(1200);
       }
     }
     await page.waitForTimeout(2500);

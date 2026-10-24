@@ -79,4 +79,28 @@ test.describe('VIDEO 08 - Defect Workflow Demo', () => {
     }
     await page.waitForTimeout(2000);
   });
+
+  test('08f - create defect form', async ({ page }) => {
+    const newDefectBtn = page.getByRole('button', { name: /New Defect|Hide Form/i }).first();
+    await expect(newDefectBtn).toBeVisible();
+    await newDefectBtn.click();
+    await page.waitForTimeout(1500);
+
+    const fields = ['Defect title', 'Environment (e.g. SIT)', 'Description', 'Steps to reproduce'];
+    for (const f of fields) {
+      const el = page.getByPlaceholder(f).first();
+      if (await el.isVisible().catch(() => false)) {
+        await el.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(400);
+      }
+    }
+
+    const title = page.getByPlaceholder('Defect title').first();
+    await title.click();
+    for (const c of 'OTP not received on login with new number') { await title.type(c, { delay: 45 }); }
+    await page.waitForTimeout(1800);
+
+    await expect(page.getByRole('button', { name: 'Create Defect' }).first()).toBeVisible();
+    await page.waitForTimeout(2000);
+  });
 });

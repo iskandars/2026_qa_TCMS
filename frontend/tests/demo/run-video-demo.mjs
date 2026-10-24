@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const BASE_URL = 'http://localhost:5173';
 const VIDEO_DIR = path.resolve(__dirname, '..', 'demo-videos');
+const RAW_DIR = path.join(VIDEO_DIR, '.raw');
 const DEMO_PASSWORD = 'Password123!';
 
 const ROLE_MAP = {
@@ -21,6 +22,8 @@ const ROLE_MAP = {
 if (!fs.existsSync(VIDEO_DIR)) {
   fs.mkdirSync(VIDEO_DIR, { recursive: true });
 }
+fs.rmSync(RAW_DIR, { recursive: true, force: true });
+fs.mkdirSync(RAW_DIR, { recursive: true });
 
 async function ensureApp(page) {
   try {
@@ -171,7 +174,7 @@ const SCENARIOS = [
   },
   {
     id: '04-test-case-management',
-    title: '04 - Test Cases (Filters, Create Form, Generate AI, Data Table)',
+    title: '04 - Test Cases (Filters, AI Scenarios, Bulk Edit, Case Detail Panel)',
     role: 'qa_lead',
     run: async (page) => {
       await login(page, 'qa_lead');
@@ -185,14 +188,53 @@ const SCENARIOS = [
       await page.locator('.reports-filters select').nth(2).selectOption('Major');
       await page.waitForTimeout(1500);
 
+      const gen = page.getByText('Generate Test Scenarios (AI)');
+      if (await gen.isVisible().catch(() => false)) {
+        await gen.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(1500);
+      }
+
       const toggleForm = page.getByRole('button', { name: /New Test Case|Hide Form/i }).first();
-      if (await toggleForm.isVisible()) { await toggleForm.click(); await page.waitForTimeout(1500); }
+      if (await toggleForm.isVisible().catch(() => false)) {
+        await toggleForm.click();
+        await page.waitForTimeout(1500);
+        await page.getByRole('button', { name: 'Hide Form' }).first().click();
+        await page.waitForTimeout(1000);
+      }
 
-      await page.evaluate(() => window.scrollTo({ top: 500, behavior: 'smooth' }));
-      await page.waitForTimeout(2000);
+      // Bulk edit toolbar
+      const boxes = page.locator('tbody input[type="checkbox"]');
+      const pick = Math.min(await boxes.count(), 3);
+      for (let i = 0; i < pick; i++) {
+        await boxes.nth(i).check({ force: true });
+        await page.waitForTimeout(450);
+      }
+      const bulk = page.locator('.bulk-toolbar');
+      await bulk.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(900);
+      await bulk.locator('select').selectOption('severity');
+      await page.waitForTimeout(900);
+      await bulk.locator('input[type="text"]').fill('Major');
+      await page.waitForTimeout(1400);
+      await bulk.getByRole('button', { name: 'Clear' }).click();
+      await page.waitForTimeout(900);
 
-      await page.evaluate(() => window.scrollTo({ top: 1500, behavior: 'smooth' }));
-      await page.waitForTimeout(2500);
+      // Test case detail panel (steps, review, version history, attachments)
+      const detailBtn = page.locator('tbody .row-actions').getByRole('button', { name: 'Detail' }).first();
+      if (await detailBtn.isVisible().catch(() => false)) {
+        await detailBtn.click();
+        await page.waitForTimeout(2000);
+        await page.getByRole('heading', { name: /Test Case Detail/i }).scrollIntoViewIfNeeded();
+        await page.waitForTimeout(1800);
+        await page.getByRole('heading', { name: /Structured Steps/i }).scrollIntoViewIfNeeded();
+        await page.waitForTimeout(1800);
+        await page.getByRole('heading', { name: /Attachments/i }).scrollIntoViewIfNeeded();
+        await page.waitForTimeout(1800);
+        await page.getByRole('button', { name: 'In Review' }).first().hover();
+        await page.waitForTimeout(1500);
+        await page.getByRole('button', { name: 'Close' }).first().click();
+        await page.waitForTimeout(1200);
+      }
 
       await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
       await page.waitForTimeout(3500);
@@ -232,7 +274,7 @@ const SCENARIOS = [
   },
   {
     id: '06-test-runs',
-    title: '06 - Test Runs (Create Run, Form Fill, Table Showcase)',
+    title: '06 - Test Runs (Create Run, Form Fill, Run Results Panel, Table Showcase)',
     role: 'qa_lead',
     run: async (page) => {
       await login(page, 'qa_lead');
@@ -250,13 +292,34 @@ const SCENARIOS = [
         for (const c of 'Daily Smoke - Sprint 15 Day 5') { await nameInput.type(c, { delay: 55 }); }
         await page.waitForTimeout(700);
 
-        const statusSel = page.locator('select').filter({ hasText: 'Planned' }).nth(1);
+        const statusSel = page.locator('.form-grid select').last();
         if (await statusSel.count() > 0) {
           await statusSel.selectOption('In Progress');
           await page.waitForTimeout(1500);
         }
+        await page.locator('.form-grid').getByRole('button', { name: 'Cancel' }).first().click();
+        await page.waitForTimeout(1000);
       }
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(1000);
+
+      // Run Results panel (per-result status, elapsed, environment, notes)
+      const viewBtn = page.locator('tbody .row-actions').getByRole('button', { name: 'View Results' }).first();
+      if (await viewBtn.isVisible().catch(() => false)) {
+        await viewBtn.click();
+        await page.waitForTimeout(2000);
+        await page.getByRole('heading', { name: /Run Results/i }).scrollIntoViewIfNeeded();
+        await page.waitForTimeout(2000);
+        const resultSel = page.locator('table select').last();
+        if (await resultSel.isVisible().catch(() => false)) {
+          const original = await resultSel.inputValue();
+          await resultSel.selectOption('Retest');
+          await page.waitForTimeout(1500);
+          await resultSel.selectOption(original);
+          await page.waitForTimeout(1500);
+        }
+        await page.getByRole('button', { name: 'Close' }).first().click();
+        await page.waitForTimeout(1200);
+      }
 
       await page.evaluate(() => window.scrollTo({ top: 500, behavior: 'smooth' }));
       await page.waitForTimeout(3500);
@@ -264,7 +327,7 @@ const SCENARIOS = [
   },
   {
     id: '07-execution-board-kanban',
-    title: '07 - Execution Board (Kanban Columns, Scroll, Cards Hover)',
+    title: '07 - Execution Board (Kanban, Inline Status & Notes, Create Defect)',
     role: 'qa_lead',
     run: async (page) => {
       await login(page, 'qa_lead');
@@ -290,10 +353,33 @@ const SCENARIOS = [
         const card = page.locator('.kanban-column').filter({ hasText: col }).locator('.kanban-card').first();
         if (await card.isVisible().catch(() => false)) {
           await card.hover({ force: true });
-          await page.waitForTimeout(1200);
+          await page.waitForTimeout(1100);
         }
       }
-      await page.waitForTimeout(3000);
+
+      // Inline execution status + notes
+      const statusSel = page.locator('.kanban-card select').first();
+      if (await statusSel.isVisible().catch(() => false)) {
+        const original = await statusSel.inputValue();
+        await statusSel.selectOption('Retest');
+        await page.waitForTimeout(1600);
+        await statusSel.selectOption(original);
+        await page.waitForTimeout(1600);
+      }
+
+      const notes = page.locator('.kanban-card textarea').first();
+      if (await notes.isVisible().catch(() => false)) {
+        await notes.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(1200);
+      }
+
+      // Create Defect action available on failed executions
+      const defectBtn = page.getByRole('button', { name: 'Create Defect' }).first();
+      if (await defectBtn.isVisible().catch(() => false)) {
+        await defectBtn.hover({ force: true });
+        await page.waitForTimeout(1800);
+      }
+      await page.waitForTimeout(2500);
     },
   },
   {
@@ -326,22 +412,35 @@ const SCENARIOS = [
         }
       }
 
+      // Inline create defect form
+      const newDefectBtn = page.getByRole('button', { name: /New Defect|Hide Form/i }).first();
+      if (await newDefectBtn.isVisible().catch(() => false)) {
+        await newDefectBtn.click();
+        await page.waitForTimeout(1500);
+        const title = page.getByPlaceholder('Defect title').first();
+        if (await title.isVisible().catch(() => false)) {
+          await title.click();
+          for (const c of 'OTP not received on login with new number') { await title.type(c, { delay: 45 }); }
+          await page.waitForTimeout(1200);
+        }
+        await page.waitForTimeout(2500);
+      }
+
       await page.evaluate(() => window.scrollTo({ top: 400, behavior: 'smooth' }));
       await page.waitForTimeout(3500);
     },
   },
   {
     id: '09-reports-analytics',
-    title: '09 - Reports (All 4 Tabs: Summary, Distribution, Traceability, Estimate)',
+    title: '09 - Reports (All 6 Tabs: Summary, Distribution, Traceability, Coverage, Trend, Estimate)',
     role: 'qa_lead',
     run: async (page) => {
       await login(page, 'qa_lead');
       await navigateTo(page, 'Reports');
       await page.waitForTimeout(2500);
 
-      const tabs = ['summary', 'distribution', 'traceability', 'estimate'];
-      const tabDisplayNames = ['Summary', 'Distribution', 'Traceability', 'Estimate'];
-      for (let i = 0; i < tabs.length; i++) {
+      const tabDisplayNames = ['Summary', 'Distribution', 'Traceability', 'Coverage', 'Trend', 'Estimate'];
+      for (let i = 0; i < tabDisplayNames.length; i++) {
         await page.locator('.tab-row').getByRole('button', { name: tabDisplayNames[i] }).click();
         await page.waitForTimeout(2200);
         await page.evaluate(() => window.scrollTo({ top: 400, behavior: 'smooth' }));
@@ -379,20 +478,190 @@ const SCENARIOS = [
       await page.evaluate(() => window.scrollTo({ top: 600, behavior: 'smooth' }));
       await page.waitForTimeout(3000);
 
-      const allTabs = ['Overview', 'Requirements', 'Test Cases', 'Test Cycles',
-        'Test Runs', 'Execution Board', 'Defects', 'Reports', 'Admin'];
+      const allTabs = ['Overview', 'Requirements', 'Test Cases', 'Test Suites', 'Test Plans',
+        'Test Cycles', 'Test Runs', 'Execution Board', 'Defects', 'Traceability', 'Reports',
+        'Activity', 'Admin'];
       for (const tab of allTabs) {
         await navigateTo(page, tab);
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(1200);
       }
       await page.waitForTimeout(3500);
+    },
+  },
+  {
+    id: '11-test-suites',
+    title: '11 - Test Suites (Create Form, Folder Hierarchy, Inline Edit/Delete)',
+    role: 'qa_lead',
+    run: async (page) => {
+      await login(page, 'qa_lead');
+      await navigateTo(page, 'Test Suites');
+      await page.waitForTimeout(2000);
+
+      await page.locator('select').first().selectOption({ index: 1 });
+      await page.waitForTimeout(800);
+
+      const name = page.getByPlaceholder('Suite name *').first();
+      await name.click();
+      for (const c of 'Authentication & Session Suite') { await name.type(c, { delay: 45 }); }
+      await page.waitForTimeout(800);
+
+      const desc = page.getByPlaceholder('Description').first();
+      await desc.click();
+      for (const c of 'Reusable suite for login, OTP and session timeout cases') { await desc.type(c, { delay: 35 }); }
+      await page.waitForTimeout(1800);
+
+      await page.getByRole('button', { name: 'Create Suite' }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1200);
+
+      const editBtn = page.locator('tbody .row-actions').getByRole('button', { name: 'Edit' }).first();
+      if (await editBtn.isVisible().catch(() => false)) {
+        await editBtn.hover();
+        await page.waitForTimeout(1200);
+        await page.locator('tbody .row-actions').getByRole('button', { name: 'Delete' }).first().hover();
+        await page.waitForTimeout(1500);
+      }
+
+      const table = page.locator('.scroll-x').last();
+      if (await table.isVisible().catch(() => false)) {
+        await table.evaluate((el) => { el.scrollLeft += 250; });
+        await page.waitForTimeout(1200);
+        await table.evaluate((el) => { el.scrollLeft = 0; });
+        await page.waitForTimeout(1200);
+      }
+      await page.waitForTimeout(2500);
+    },
+  },
+  {
+    id: '12-test-plans',
+    title: '12 - Test Plans & Milestones (Create Forms, Linkage Tables)',
+    role: 'qa_lead',
+    run: async (page) => {
+      await login(page, 'qa_lead');
+      await navigateTo(page, 'Test Plans');
+      await page.waitForTimeout(2000);
+
+      // Milestone form
+      await page.locator('select').first().selectOption({ index: 1 });
+      await page.waitForTimeout(800);
+      const msName = page.getByPlaceholder('Milestone name *').first();
+      await msName.click();
+      for (const c of 'Release 2.5 - Digital Onboarding') { await msName.type(c, { delay: 45 }); }
+      await page.waitForTimeout(1200);
+
+      const dateInput = page.locator('input[type="date"]').first();
+      if (await dateInput.isVisible().catch(() => false)) {
+        await dateInput.fill('2026-12-31');
+        await page.waitForTimeout(1200);
+      }
+
+      const msStatus = page.locator('select').filter({ hasText: 'Open' }).first();
+      if (await msStatus.isVisible().catch(() => false)) {
+        await msStatus.selectOption('In Progress');
+        await page.waitForTimeout(1500);
+      }
+
+      await page.getByRole('heading', { name: /Test Plans/i }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1500);
+
+      // Plan form
+      const planName = page.getByPlaceholder('Plan name *').first();
+      await planName.click();
+      for (const c of 'SIT Plan - Release 2.5') { await planName.type(c, { delay: 45 }); }
+      await page.waitForTimeout(1200);
+
+      const planStatus = page.locator('select').filter({ hasText: 'Draft' }).first();
+      if (await planStatus.isVisible().catch(() => false)) {
+        await planStatus.selectOption('Active');
+        await page.waitForTimeout(1500);
+      }
+
+      const planDesc = page.getByPlaceholder('Description').last();
+      await planDesc.click();
+      for (const c of 'Full SIT scope covering onboarding, accounts and payments') { await planDesc.type(c, { delay: 30 }); }
+      await page.waitForTimeout(1500);
+
+      await page.getByRole('button', { name: 'Create Test Plan' }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(2000);
+
+      await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
+      await page.waitForTimeout(3000);
+    },
+  },
+  {
+    id: '13-traceability',
+    title: '13 - Traceability Matrix (Coverage KPIs, Requirement to TC Linking, Uncovered Cases)',
+    role: 'qa_lead',
+    run: async (page) => {
+      await login(page, 'qa_lead');
+      await navigateTo(page, 'Traceability');
+      await page.waitForTimeout(2500);
+
+      const kpis = page.locator('.kpi-item');
+      const kpiCount = Math.min(await kpis.count(), 5);
+      for (let i = 0; i < kpiCount; i++) {
+        await kpis.nth(i).scrollIntoViewIfNeeded();
+        await page.waitForTimeout(500);
+      }
+      await page.waitForTimeout(1500);
+
+      const headers = ['Requirement', 'Project', 'Priority', 'Status', 'TC Linked', 'Approved', 'Passed', 'Coverage'];
+      for (const h of headers) {
+        const th = page.getByRole('columnheader', { name: h }).first();
+        if (await th.isVisible().catch(() => false)) {
+          await th.scrollIntoViewIfNeeded();
+          await page.waitForTimeout(350);
+        }
+      }
+
+      const table = page.locator('.scroll-x').first();
+      if (await table.isVisible().catch(() => false)) {
+        await table.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+        await page.waitForTimeout(1200);
+        await table.evaluate((el) => { el.scrollLeft = 0; });
+        await page.waitForTimeout(1200);
+      }
+
+      await page.getByRole('heading', { name: /Uncovered Test Cases/i }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(2500);
+
+      await page.getByRole('button', { name: 'Export CSV' }).first().hover();
+      await page.waitForTimeout(2000);
+    },
+  },
+  {
+    id: '14-activity-audit',
+    title: '14 - Activity & Audit Log (Chronological Trace Feed, Actor Chips, Refresh)',
+    role: 'qa_lead',
+    run: async (page) => {
+      await login(page, 'qa_lead');
+      await navigateTo(page, 'Activity');
+      await page.waitForTimeout(2500);
+
+      await page.getByRole('heading', { name: /Activity & Audit Log/i }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1500);
+
+      await page.getByRole('button', { name: 'Refresh' }).first().click();
+      await page.waitForTimeout(2000);
+
+      const items = page.locator('.activity-item');
+      const count = Math.min(await items.count(), 8);
+      for (let i = 0; i < count; i++) {
+        await items.nth(i).scrollIntoViewIfNeeded();
+        await page.waitForTimeout(500);
+      }
+
+      for (let i = 0; i < 4; i++) {
+        await page.evaluate(() => window.scrollBy(0, 320));
+        await page.waitForTimeout(800);
+      }
+      await page.waitForTimeout(2500);
     },
   },
 ];
 
 async function main() {
   console.log('\n' + '='.repeat(70));
-  console.log('  TCMS VIDEO DEMO RUNNER — Playwright Record Per Page');
+  console.log('  BINA QA TCMS VIDEO DEMO RUNNER — Playwright Record Per Page');
   console.log('='.repeat(70));
   console.log('  App URL     :', BASE_URL);
   console.log('  Video output:', VIDEO_DIR);
@@ -411,7 +680,7 @@ async function main() {
 
     const context = await sharedBrowser.newContext({
       viewport: { width: 1440, height: 900 },
-      recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
+      recordVideo: { dir: RAW_DIR, size: { width: 1440, height: 900 } },
       ignoreHTTPSErrors: true,
     });
     const page = await context.newPage();
@@ -433,6 +702,7 @@ async function main() {
   }
 
   await sharedBrowser.close();
+  fs.rmSync(RAW_DIR, { recursive: true, force: true });
 
   console.log('\n' + '-'.repeat(70));
   console.log(`  RESULTS:  ✅ ${passed} passed   ❌ ${failed} failed   of ${SCENARIOS.length} scenarios`);

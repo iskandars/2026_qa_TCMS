@@ -101,4 +101,56 @@ test.describe('VIDEO 04 - Test Case Management Demo', () => {
     }
     await page.waitForTimeout(2000);
   });
+
+  test('04g - bulk edit toolbar', async ({ page }) => {
+    const boxes = page.locator('tbody input[type="checkbox"]');
+    const pick = Math.min(await boxes.count(), 3);
+    for (let i = 0; i < pick; i++) {
+      await boxes.nth(i).check({ force: true });
+      await page.waitForTimeout(450);
+    }
+
+    const bulk = page.locator('.bulk-toolbar');
+    await bulk.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(900);
+
+    await bulk.locator('select').selectOption('severity');
+    await page.waitForTimeout(900);
+    await bulk.locator('input[type="text"]').fill('Major');
+    await page.waitForTimeout(1200);
+
+    await expect(bulk.getByRole('button', { name: 'Apply Bulk Edit' })).toBeVisible();
+    await bulk.getByRole('button', { name: 'Clear' }).click();
+    await page.waitForTimeout(1000);
+  });
+
+  test('04h - test case detail panel (steps, review, versions, attachments)', async ({ page }) => {
+    const detailBtn = page.locator('tbody .row-actions').getByRole('button', { name: 'Detail' }).first();
+    await expect(detailBtn).toBeVisible();
+    await detailBtn.click();
+    await page.waitForTimeout(2000);
+
+    await expect(page.getByRole('heading', { name: /Test Case Detail/i })).toBeVisible();
+    await page.getByRole('heading', { name: /Test Case Detail/i }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+
+    await expect(page.getByRole('heading', { name: /Structured Steps/i })).toBeVisible();
+    await page.getByRole('heading', { name: /Structured Steps/i }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+
+    await expect(page.getByRole('button', { name: 'Add Step' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save Steps' })).toBeVisible();
+
+    await page.getByText(/Version History/i).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1200);
+
+    await page.getByRole('heading', { name: /Attachments/i }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+
+    await page.getByRole('button', { name: 'In Review' }).first().hover();
+    await page.waitForTimeout(1500);
+
+    await page.getByRole('button', { name: 'Close' }).first().click();
+    await page.waitForTimeout(1000);
+  });
 });

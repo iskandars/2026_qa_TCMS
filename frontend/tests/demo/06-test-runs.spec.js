@@ -53,4 +53,36 @@ test.describe('VIDEO 06 - Test Runs Demo', () => {
     }
     await page.waitForTimeout(3500);
   });
+
+  test('06d - run results panel (per-case status, elapsed, environment)', async ({ page }) => {
+    const viewBtn = page.locator('tbody .row-actions').getByRole('button', { name: 'View Results' }).first();
+    await expect(viewBtn).toBeVisible();
+    await viewBtn.click();
+    await page.waitForTimeout(2000);
+
+    await expect(page.getByRole('heading', { name: /Run Results/i })).toBeVisible();
+    await page.getByRole('heading', { name: /Run Results/i }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+
+    const cols = ['Code', 'Title', 'Assignee', 'Status', 'Elapsed (min)', 'Environment', 'Notes', 'Evidence'];
+    for (const col of cols) {
+      const hdr = page.getByRole('columnheader', { name: col }).first();
+      if (await hdr.isVisible().catch(() => false)) {
+        await hdr.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(350);
+      }
+    }
+
+    const resultSel = page.locator('table select').last();
+    if (await resultSel.isVisible().catch(() => false)) {
+      const original = await resultSel.inputValue();
+      await resultSel.selectOption('Retest');
+      await page.waitForTimeout(1500);
+      await resultSel.selectOption(original);
+      await page.waitForTimeout(1500);
+    }
+
+    await page.getByRole('button', { name: 'Close' }).first().click();
+    await page.waitForTimeout(1200);
+  });
 });
