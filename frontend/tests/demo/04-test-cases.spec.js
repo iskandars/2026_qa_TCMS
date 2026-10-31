@@ -7,6 +7,15 @@ test.describe('VIDEO 04 - Test Case Management Demo', () => {
     await navigateTo(page, 'Test Cases');
   });
 
+  test('test case filters use three columns on desktop', async ({ page }) => {
+    const filters = page.locator('.test-case-filters');
+    await expect(filters).toBeVisible();
+    const columnCount = await filters.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+    expect(columnCount).toBe(3);
+    await expect(filters.locator('label').filter({ hasText: 'Project' })).toBeVisible();
+    await expect(filters.locator('label').filter({ hasText: 'User Story' })).toBeVisible();
+  });
+
   test('04a - page header and action buttons', async ({ page }) => {
     await expect(page.getByRole('heading', { name: /Test Case Management/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /New Test Case|Hide Form/i })).toBeVisible();

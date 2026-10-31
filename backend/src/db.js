@@ -353,5 +353,32 @@ export async function initializeDatabase() {
     } catch (_e) {}
   }
 
+  const projectCols = [
+    ['start_date', 'DATE'],
+    ['end_date', 'DATE'],
+    ['progress', 'INTEGER DEFAULT 0'],
+    ['priority', "VARCHAR(50) DEFAULT 'Medium'"],
+    ['budget_hours', 'INTEGER DEFAULT 0'],
+  ];
+  for (const [col, type] of projectCols) {
+    try {
+      await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+
+  const milestoneCols = [
+    ['start_date', 'DATE'],
+    ['progress', 'INTEGER DEFAULT 0'],
+  ];
+  for (const [col, type] of milestoneCols) {
+    try {
+      await pool.query(`ALTER TABLE milestones ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    } catch (_e) {}
+  }
+
+  try {
+    await pool.query(`ALTER TABLE test_cycles ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0`);
+  } catch (_e) {}
+
   await seedDatabase(pool);
 }

@@ -103,6 +103,9 @@ test.describe('VIDEO 09 - Reports & Analytics Demo', () => {
   });
 
   test('09g - reports filters bar', async ({ page }) => {
+    const filters = page.locator('.report-filters');
+    const columnCount = await filters.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+    expect(columnCount).toBe(3);
     const labels = ['Project', 'Severity', 'Defect Status', 'Tipe Test'];
     for (const label of labels) {
       const lbl = page.locator('.reports-filters label').filter({ hasText: label });

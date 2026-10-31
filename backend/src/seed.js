@@ -68,6 +68,11 @@ export async function seedDatabase(pool) {
       description: 'Customer-facing portal and onboarding flows',
       status: 'Active',
       owner_email: 'qa.lead@company.com',
+      start_date: '2026-10-01',
+      end_date: '2026-11-30',
+      progress: 68,
+      priority: 'High',
+      budget_hours: 240,
     },
     {
       name: 'Warehouse Ops',
@@ -75,6 +80,11 @@ export async function seedDatabase(pool) {
       description: 'Warehouse management and fulfillment',
       status: 'Active',
       owner_email: 'pm@company.com',
+      start_date: '2026-10-15',
+      end_date: '2026-12-15',
+      progress: 42,
+      priority: 'Medium',
+      budget_hours: 180,
     },
   ];
 
@@ -84,9 +94,20 @@ export async function seedDatabase(pool) {
       const ownerUser = await pool.query('SELECT id FROM users WHERE email = $1', [project.owner_email]);
       const ownerId = ownerUser.rows[0]?.id ?? null;
       await pool.query(
-        `INSERT INTO projects (name, key_code, description, status, owner_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [project.name, project.key_code, project.description, project.status, ownerId]
+        `INSERT INTO projects (name, key_code, description, status, owner_id, start_date, end_date, progress, priority, budget_hours)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [project.name, project.key_code, project.description, project.status, ownerId, project.start_date, project.end_date, project.progress, project.priority, project.budget_hours]
+      );
+    } else {
+      await pool.query(
+        `UPDATE projects SET 
+          start_date = COALESCE(start_date, $1),
+          end_date = COALESCE(end_date, $2),
+          progress = CASE WHEN progress = 0 OR progress IS NULL THEN $3 ELSE progress END,
+          priority = COALESCE(priority, $4),
+          budget_hours = CASE WHEN budget_hours = 0 OR budget_hours IS NULL THEN $5 ELSE budget_hours END
+         WHERE key_code = $6`,
+        [project.start_date, project.end_date, project.progress, project.priority, project.budget_hours, project.key_code]
       );
     }
   }
@@ -347,4 +368,42 @@ export async function seedDatabase(pool) {
       );
     }
   }
+
+  // Seed sample milestones for Gantt chart & project tracking
+  const milestoneSeed = [
+    { project_key: 'CP', name: 'CP Sprint 26 Release SIT', description: 'System Integration Testing for core onboarding flows', status: 'Completed', start_date: '2026-10-01', due_date: '2026-10-25', progress: 100 },
+    { project_key: 'CP', name: 'CP Security & UAT Readiness', description: 'Vulnerability assessment and UAT sign-off', status: 'In Progress', start_date: '2026-10-26', due_date: '2026-11-20', progress: 65 },
+    { project_key: 'WO', name: 'WO Warehouse Ops Core SIT', description: 'Fulfillment and inventory pipeline validation', status: 'In Progress', start_date: '2026-10-15', due_date: '2026-11-15', progress: 45 },
+    { project_key: 'WO', name: 'WO Performance Benchmark', description: 'High throughput load testing', status: 'Planned', start_date: '2026-11-16', due_date: '2026-12-10', progress: 10 },
+  ];
+
+  for (const m of milestoneSeed) {
+    const exists = await pool.query('SELECT id FROM milestones WHERE name = $1', [m.name]);
+    if (exists.rowCount === 0) {
+      const project = await pool.query('SELECT id FROM projects WHERE key_code = $1', [m.project_key]);
+      if (project.rows[0]) {
+        await pool.query(
+          `INSERT INTO milestones (project_id, name, description, status, start_date, due_date, progress)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [project.rows[0].id, m.name, m.description, m.status, m.start_date, m.due_date, m.progress]
+        );
+      }
+    }
+  }
+
+  // Ensure test cycles have dates and progress populated for Gantt timeline
+  await pool.query(`
+    UPDATE test_cycles SET 
+      planned_start = COALESCE(planned_start, '2026-10-10'::timestamptz),
+      planned_end = COALESCE(planned_end, '2026-11-10'::timestamptz),
+      progress = CASE WHEN progress = 0 OR progress IS NULL THEN 75 ELSE progress END
+    WHERE name = 'CP Sprint 26 Regression'
+  `);
+  await pool.query(`
+    UPDATE test_cycles SET 
+      planned_start = COALESCE(planned_start, '2026-10-20'::timestamptz),
+      planned_end = COALESCE(planned_end, '2026-11-25'::timestamptz),
+      progress = CASE WHEN progress = 0 OR progress IS NULL THEN 40 ELSE progress END
+    WHERE name = 'WO Release Candidate'
+  `);
 }

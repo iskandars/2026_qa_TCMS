@@ -15,7 +15,8 @@ test.describe('VIDEO 07 - Execution Board (Kanban) Demo', () => {
   });
 
   test('07b - kanban columns showcase', async ({ page }) => {
-    const columns = ['Not Executed', 'Passed', 'Failed', 'Retest'];
+    const columns = ['Not Executed', 'In Progress Test', 'Passed', 'Failed', 'Retest'];
+    await expect(page.locator('.kanban-header').filter({ hasText: /^In Progress Test \(/ })).toBeVisible();
     for (const col of columns) {
       const colHeader = page.getByText(new RegExp(`^${col}\\s*\\(`)).first();
       if (await colHeader.isVisible().catch(() => false)) {
@@ -60,6 +61,9 @@ test.describe('VIDEO 07 - Execution Board (Kanban) Demo', () => {
     await expect(statusSel).toBeVisible();
 
     const original = await statusSel.inputValue();
+    await statusSel.selectOption('In Progress Test');
+    await expect(statusSel).toHaveValue('In Progress Test');
+    await statusSel.selectOption(original);
     await statusSel.selectOption('Retest');
     await page.waitForTimeout(1800);
     await statusSel.selectOption(original);

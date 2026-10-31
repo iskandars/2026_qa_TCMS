@@ -12,11 +12,17 @@
   },
   "dependencies": {
     "axios": "^1.7.9",
+    "bootstrap-tour": "^0.12.0",
+    "driver.js": "^1.10.2",
+    "hopscotch": "^0.3.1",
+    "intro.js": "^8.6.0",
+    "jquery": "^3.7.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
+    "shepherd.js": "^15.3.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

@@ -7,6 +7,15 @@ test.describe('VIDEO 08 - Defect Workflow Demo', () => {
     await navigateTo(page, 'Defects');
   });
 
+  test('defect filters use two columns on desktop', async ({ page }) => {
+    const filters = page.locator('.defect-filters');
+    await expect(filters).toBeVisible();
+    const columnCount = await filters.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+    expect(columnCount).toBe(2);
+    await expect(filters.getByLabel('Project')).toBeVisible();
+    await expect(filters.getByLabel('Priority')).toBeVisible();
+  });
+
   test('08a - page header and export buttons', async ({ page }) => {
     await expect(page.getByRole('heading', { name: /Defect Workflow States/i })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();

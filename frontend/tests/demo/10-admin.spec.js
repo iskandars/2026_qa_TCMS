@@ -68,7 +68,7 @@ test.describe('VIDEO 10 - Admin Panel & RBAC Demo', () => {
     await loginAsQA(page, 'qa_lead');
     await page.waitForTimeout(1500);
 
-    const allTabs = ['Overview', 'Requirements', 'Test Cases', 'Test Suites', 'Test Plans',
+    const allTabs = ['Overview', 'Projects', 'Gantt Chart', 'Requirements', 'Test Cases', 'Test Suites', 'Test Plans',
       'Test Cycles', 'Test Runs', 'Execution Board', 'Defects', 'Traceability', 'Reports',
       'Activity', 'Admin'];
     for (const tab of allTabs) {

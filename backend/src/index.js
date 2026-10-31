@@ -65,10 +65,10 @@ const ROLE_LABELS = {
 };
 
 const ROLE_PERMISSIONS = {
-  qa_lead: ['read', 'write', 'approve', 'manage_users', 'bulk_import', 'generate_scenarios', 'export_reports', 'upload_requirements', 'manage_cycles'],
+  qa_lead: ['read', 'write', 'approve', 'manage_users', 'bulk_import', 'generate_scenarios', 'export_reports', 'upload_requirements', 'manage_cycles', 'manage_projects'],
   qa_engineer: ['read', 'write', 'execute', 'bulk_import', 'export_reports', 'upload_requirements'],
   product: ['read', 'write', 'approve', 'export_reports', 'upload_requirements'],
-  pm: ['read', 'write', 'approve', 'manage_cycles', 'export_reports', 'upload_requirements'],
+  pm: ['read', 'write', 'approve', 'manage_cycles', 'export_reports', 'upload_requirements', 'manage_projects'],
   business_analyst: ['read', 'write_requirements', 'approve_requirements', 'upload_requirements', 'export_reports'],
 };
 
@@ -131,6 +131,24 @@ function requireRoles(...roles) {
 
 function hasPermission(userRole, permission) {
   return (ROLE_PERMISSIONS[userRole] || []).includes(permission);
+}
+
+function safeInt(val) {
+  if (val === null || val === undefined || val === '') return null;
+  const n = parseInt(val, 10);
+  return isNaN(n) ? null : n;
+}
+
+function safeDate(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    return isNaN(val.getTime()) ? null : val.toISOString().split('T')[0];
+  }
+  const s = String(val).trim();
+  if (!s || s === '-' || s.toLowerCase() === 'n/a' || s.toLowerCase() === 'null') return null;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().split('T')[0];
 }
 
 function countSteps(stepsText) {
@@ -450,10 +468,56 @@ app.get('/api/users', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/users', requireAuth, requireRoles('qa_lead'), async (req, res) => {
+  const { name, email, password, role, department } = req.body || {};
+
+  if (!name || !String(name).trim()) {
+    return res.status(400).json({ message: 'Name is required.' });
+  }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
+    return res.status(400).json({ message: 'A valid email is required.' });
+  }
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+  }
+  if (!role || !ROLE_LABELS[role]) {
+    return res.status(400).json({ message: 'A valid role is required.' });
+  }
+
+  try {
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+    if (existing.rowCount > 0) {
+      return res.status(409).json({ message: 'A user with this email already exists.' });
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 10);
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password_hash, role, department, active, sso_provider)
+       VALUES ($1, $2, $3, $4, $5, TRUE, 'local')
+       RETURNING *`,
+      [String(name).trim(), normalizedEmail, passwordHash, role, department ? String(department).trim() : null]
+    );
+
+    await logActivity(req.user.sub, 'user', result.rows[0].id, 'create', `${result.rows[0].name} (${ROLE_LABELS[role]})`);
+
+    res.status(201).json({ user: sanitizeUser(result.rows[0]) });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to create user.' });
+  }
+});
+
 app.get('/api/projects', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT p.*, u.name AS owner_name
+      SELECT p.*, u.name AS owner_name,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id) AS test_cases_count,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Passed' OR tc.status_sit = 'Passed')) AS passed_count,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Failed' OR tc.status_sit = 'Failed')) AS failed_count,
+        (SELECT COUNT(*)::int FROM requirements r WHERE r.project_id = p.id) AS requirements_count,
+        (SELECT COUNT(*)::int FROM test_cycles cyc WHERE cyc.project_id = p.id) AS cycles_count,
+        (SELECT COUNT(*)::int FROM defects d WHERE d.project_id = p.id) AS defects_count,
+        (SELECT COUNT(*)::int FROM defects d WHERE d.project_id = p.id AND d.status NOT IN ('Closed', 'Resolved', 'Rejected')) AS open_defects_count
       FROM projects p
       LEFT JOIN users u ON u.id = p.owner_id
       ORDER BY p.updated_at DESC
@@ -464,19 +528,62 @@ app.get('/api/projects', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/projects', requireAuth, requireRoles('qa_lead', 'pm', 'product'), async (req, res) => {
-  const { name, keyCode, description, status = 'Active', ownerId } = req.body || {};
-  if (!name || !keyCode) {
-    return res.status(400).json({ message: 'Project name and key are required.' });
+app.get('/api/projects/:id', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.*, u.name AS owner_name,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id) AS test_cases_count,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Passed' OR tc.status_sit = 'Passed')) AS passed_count,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Failed' OR tc.status_sit = 'Failed')) AS failed_count,
+        (SELECT COUNT(*)::int FROM requirements r WHERE r.project_id = p.id) AS requirements_count,
+        (SELECT COUNT(*)::int FROM test_cycles cyc WHERE cyc.project_id = p.id) AS cycles_count,
+        (SELECT COUNT(*)::int FROM defects d WHERE d.project_id = p.id) AS defects_count,
+        (SELECT COUNT(*)::int FROM defects d WHERE d.project_id = p.id AND d.status NOT IN ('Closed', 'Resolved', 'Rejected')) AS open_defects_count
+      FROM projects p
+      LEFT JOIN users u ON u.id = p.owner_id
+      WHERE p.id = $1
+    `, [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Project not found.' });
+    res.json({ project: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch project.' });
+  }
+});
+
+app.post('/api/projects', requireAuth, requireRoles('qa_lead', 'pm'), async (req, res) => {
+  const {
+    name, keyCode, description, status = 'Active', ownerId,
+    startDate, endDate, progress = 0, priority = 'Medium', budgetHours = 0,
+  } = req.body || {};
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ message: 'Project name is required.' });
+  }
+  if (!keyCode || !keyCode.trim()) {
+    return res.status(400).json({ message: 'Project key is required.' });
   }
 
+  const cleanKey = keyCode.trim().toUpperCase();
+
   try {
+    const conflict = await pool.query('SELECT id FROM projects WHERE key_code = $1', [cleanKey]);
+    if (conflict.rowCount > 0) {
+      return res.status(409).json({ message: `Project key '${cleanKey}' is already taken. Please choose another key code.` });
+    }
+
+    const cleanOwner = safeInt(ownerId) || req.user.sub;
+    const cleanProgress = Math.max(0, Math.min(100, safeInt(progress) || 0));
+    const cleanStart = safeDate(startDate);
+    const cleanEnd = safeDate(endDate);
+
     const result = await pool.query(
-      `INSERT INTO projects (name, key_code, description, status, owner_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO projects (name, key_code, description, status, owner_id, start_date, end_date, progress, priority, budget_hours)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [name, keyCode.toUpperCase(), description || '', status, ownerId || req.user.sub]
+      [name.trim(), cleanKey, description || '', status, cleanOwner, cleanStart, cleanEnd, cleanProgress, priority, safeInt(budgetHours) || 0]
     );
+
+    await logActivity(req.user.sub, 'project', result.rows[0].id, 'create', result.rows[0].name);
     res.status(201).json({ project: result.rows[0] });
   } catch (error) {
     res.status(500).json({ message: error.message || 'Unable to create project.' });
@@ -669,8 +776,8 @@ app.post('/api/test-cases', requireAuth, requireRoles('qa_lead', 'qa_engineer', 
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
       RETURNING *`,
       [
-        body.projectId, body.code, body.title, body.summary || '', body.status || 'Draft', body.severity || 'Medium',
-        body.priority || 'Medium', body.assigneeId || null, req.user.sub, body.tags || '', body.steps || body.langkah_uji || '',
+        safeInt(body.projectId), body.code, body.title, body.summary || '', body.status || 'Draft', body.severity || 'Medium',
+        body.priority || 'Medium', safeInt(body.assigneeId), req.user.sub, body.tags || '', body.steps || body.langkah_uji || '',
         body.expectedResult || body.hasil_yang_diharapkan || '', body.modulFitur || body.modul_fitur || '',
         body.userStoryCoverage || body.user_story_coverage || '', body.tipeTest || body.tipe_test || 'Functional',
         body.userRole || body.user_role || '', body.tujuanPengujian || body.tujuan_pengujian || '',
@@ -678,10 +785,10 @@ app.post('/api/test-cases', requireAuth, requireRoles('qa_lead', 'qa_engineer', 
         body.validasiDataUji || body.validasi_data_uji || '',
         body.hasilYangDiharapkan || body.hasil_yang_diharapkan || body.expectedResult || '',
         body.picQA || body.pic_qa || '', body.statusSIT || body.status_sit || 'Not Started',
-        body.dateSITExecuted || body.date_sit_executed || null, body.dateSITDone || body.date_sit_done || null,
+        safeDate(body.dateSITExecuted || body.date_sit_executed), safeDate(body.dateSITDone || body.date_sit_done),
         body.objectTestVersion || body.object_test_version || '', body.apiVersion || body.api_version || '',
-        body.testScenarioVersion || body.test_scenario_version || '', body.requirementId || body.requirement_id || null,
-        body.suiteId || body.suite_id || null, body.milestoneId || body.milestone_id || null,
+        body.testScenarioVersion || body.test_scenario_version || '', safeInt(body.requirementId || body.requirement_id),
+        safeInt(body.suiteId || body.suite_id), safeInt(body.milestoneId || body.milestone_id),
         body.preconditions || '',
       ]
     );
@@ -813,8 +920,8 @@ app.post('/api/test-cases/bulk', requireAuth, requireRoles('qa_lead', 'qa_engine
           row['Hasil Yang Diharapkan'] || row.hasil_yang_diharapkan || '',
           row['PIC QA'] || row.pic_qa || '',
           row['Status SIT'] || row.status_sit || 'Not Started',
-          row['Date SIT Executed'] || row.date_sit_executed || null,
-          row['Date SIT Done'] || row.date_sit_done || null,
+          safeDate(row['Date SIT Executed'] || row.date_sit_executed),
+          safeDate(row['Date SIT Done'] || row.date_sit_done),
           row['Object Test Version'] || row.object_test_version || '',
           row['API Version'] || row.api_version || '',
           row['Test Scenario Version'] || row.test_scenario_version || '',
@@ -905,7 +1012,16 @@ app.post('/api/test-runs', requireAuth, requireRoles('qa_lead', 'qa_engineer', '
   }
 
   try {
-    const tcs = await pool.query('SELECT * FROM test_cases WHERE project_id = $1 OR id = ANY($2::int[]) LIMIT 200', [projectId, testCaseIds.length ? testCaseIds : [0]]);
+    let casesQuery;
+    let casesParams;
+    if (Array.isArray(testCaseIds) && testCaseIds.length > 0) {
+      casesQuery = 'SELECT * FROM test_cases WHERE id = ANY($1::int[]) AND project_id = $2 ORDER BY id ASC LIMIT 200';
+      casesParams = [testCaseIds, safeInt(projectId)];
+    } else {
+      casesQuery = 'SELECT * FROM test_cases WHERE project_id = $1 ORDER BY id ASC LIMIT 200';
+      casesParams = [safeInt(projectId)];
+    }
+    const tcs = await pool.query(casesQuery, casesParams);
     const cases = tcs.rows;
     const estimatedMinutes = cases.reduce((sum, tc) => sum + estimateTestCaseTime(tc), 0);
 
@@ -1137,85 +1253,151 @@ app.patch('/api/admin/users/:id/role', requireAuth, requireRoles('qa_lead'), asy
   }
 });
 
+async function getAdvancedReportData(projectId) {
+  const cleanProjectId = safeInt(projectId);
+  const filterP = cleanProjectId ? 'WHERE project_id = $1' : '';
+  const paramsP = cleanProjectId ? [cleanProjectId] : [];
+
+  const [
+    totalTC, passedTC, failedTC, draftTC, reviewTC,
+    byStatus, bySeverity, byPriority, byTipeTest, byStatusSIT,
+    totalDef, openDef, resolvedDef, byDefStatus, byDefSeverity, byDefPriority,
+    projectsResult, cyclesResult,
+  ] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP}`, paramsP),
+    pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} (status = 'Passed' OR status_sit = 'Passed')`, paramsP),
+    pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} (status = 'Failed' OR status_sit = 'Failed')`, paramsP),
+    pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} status = 'Draft'`, paramsP),
+    pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} status = 'Review'`, paramsP),
+    pool.query(`SELECT COALESCE(status, 'Draft') as status, COUNT(*)::int AS count FROM test_cases ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY status ORDER BY count DESC`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`SELECT COALESCE(severity, 'Medium') as severity, COUNT(*)::int AS count FROM test_cases ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY severity ORDER BY count DESC`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`SELECT COALESCE(priority, 'Medium') as priority, COUNT(*)::int AS count FROM test_cases ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY priority ORDER BY count DESC`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`SELECT COALESCE(tipe_test, 'Functional') as tipe_test, COUNT(*)::int AS count FROM test_cases ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY tipe_test ORDER BY count DESC NULLS LAST`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`SELECT COALESCE(status_sit, 'Not Started') as status_sit, COUNT(*)::int AS count FROM test_cases ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY status_sit ORDER BY count DESC NULLS LAST`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`SELECT COUNT(*)::int AS total FROM defects ${filterP}`, paramsP),
+    pool.query(`SELECT COUNT(*)::int AS total FROM defects ${filterP ? filterP + ' AND ' : 'WHERE '} status IN ('Open','In Progress','In Review')`, paramsP),
+    pool.query(`SELECT COUNT(*)::int AS total FROM defects ${filterP ? filterP + ' AND ' : 'WHERE '} status IN ('Resolved','Closed')`, paramsP),
+    pool.query(`SELECT COALESCE(status, 'Open') as status, COUNT(*)::int AS count FROM defects ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY status ORDER BY count DESC`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`SELECT COALESCE(severity, 'Major') as severity, COUNT(*)::int AS count FROM defects ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY severity ORDER BY count DESC`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`SELECT COALESCE(priority, 'Medium') as priority, COUNT(*)::int AS count FROM defects ${cleanProjectId ? 'WHERE project_id = $1' : ''} GROUP BY priority ORDER BY count DESC`, cleanProjectId ? [cleanProjectId] : []),
+    pool.query(`
+      SELECT p.*, u.name AS owner_name,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id) as test_cases_count,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Passed' OR tc.status_sit = 'Passed')) as passed_count,
+        (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Failed' OR tc.status_sit = 'Failed')) as failed_count,
+        (SELECT COUNT(*)::int FROM defects d WHERE d.project_id = p.id AND d.status NOT IN ('Closed', 'Resolved', 'Rejected')) as open_defects_count
+      FROM projects p
+      LEFT JOIN users u ON u.id = p.owner_id
+      ${cleanProjectId ? 'WHERE p.id = $1' : ''}
+      ORDER BY p.name ASC
+    `, paramsP),
+    pool.query(`
+      SELECT c.*, p.name as project_name, u.name as owner_name,
+        (SELECT COUNT(*)::int FROM cycle_cases cc WHERE cc.cycle_id = c.id) as total_cases,
+        (SELECT COUNT(*)::int FROM cycle_cases cc WHERE cc.cycle_id = c.id AND cc.status = 'Passed') as passed_cases,
+        (SELECT COUNT(*)::int FROM cycle_cases cc WHERE cc.cycle_id = c.id AND cc.status = 'Failed') as failed_cases
+      FROM test_cycles c
+      JOIN projects p ON p.id = c.project_id
+      LEFT JOIN users u ON u.id = c.owner_id
+      ${cleanProjectId ? 'WHERE c.project_id = $1' : ''}
+      ORDER BY c.planned_start DESC NULLS LAST
+    `, paramsP),
+  ]);
+
+  const tcr = await pool.query(`SELECT * FROM test_cases ${filterP} LIMIT 100`, paramsP);
+  const totalEstimate = tcr.rows.reduce((sum, tc) => sum + estimateTestCaseTime(tc), 0);
+
+  const reqs = await pool.query(`
+    SELECT r.*, p.name AS project_name
+    FROM requirements r
+    LEFT JOIN projects p ON p.id = r.project_id
+    ${cleanProjectId ? 'WHERE r.project_id = $1' : ''}
+    ORDER BY r.id DESC LIMIT 40
+  `, paramsP);
+
+  const traceability = [];
+  for (const req of reqs.rows) {
+    const linked = await pool.query(`SELECT COUNT(*)::int AS count FROM test_cases WHERE requirement_id = $1 OR user_story_coverage ILIKE $2`, [req.id, `%${req.id}%`]);
+    const defects = await pool.query(`SELECT COUNT(*)::int AS count FROM defects d JOIN test_cases tc ON tc.id = d.linked_test_case_id WHERE tc.requirement_id = $1`, [req.id]);
+    const tcCount = linked.rows[0].count;
+    traceability.push({
+      requirementId: req.id,
+      requirementTitle: req.title,
+      projectName: req.project_name || 'General',
+      priority: req.priority || 'Medium',
+      status: req.status || 'Draft',
+      testCasesLinked: tcCount,
+      defectsFound: defects.rows[0].count,
+      coveragePercent: Math.min(100, Math.round((tcCount / Math.max(1, 2)) * 100)),
+    });
+  }
+
+  const tcTotal = totalTC.rows[0].total;
+  const tcPassed = passedTC.rows[0].total;
+  const tcFailed = failedTC.rows[0].total;
+  const defTotal = totalDef.rows[0].total;
+  const defOpen = openDef.rows[0].total;
+  const defResolved = resolvedDef.rows[0].total;
+
+  const testedCount = tcPassed + tcFailed;
+  const passRate = testedCount > 0 ? Math.round((tcPassed / testedCount) * 100) : 0;
+  const defectResolutionRate = defTotal > 0 ? Math.round((defResolved / defTotal) * 100) : 0;
+
+  return {
+    projectId: cleanProjectId,
+    summary: {
+      testCasesTotal: tcTotal,
+      testCasesPassed: tcPassed,
+      testCasesFailed: tcFailed,
+      testCasesDraft: draftTC.rows[0].total,
+      testCasesReview: reviewTC.rows[0].total,
+      defectsTotal: defTotal,
+      defectsOpen: defOpen,
+      defectsResolved: defResolved,
+      passRate,
+      defectResolutionRate,
+      estimatedTotalMinutes: totalEstimate,
+    },
+    projects: projectsResult.rows,
+    cycles: cyclesResult.rows,
+    byStatus: byStatus.rows,
+    bySeverity: bySeverity.rows,
+    byPriority: byPriority.rows,
+    byTipeTest: byTipeTest.rows,
+    byStatusSIT: byStatusSIT.rows,
+    byDefectStatus: byDefStatus.rows,
+    byDefectSeverity: byDefSeverity.rows,
+    byDefectPriority: byDefPriority.rows,
+    traceability,
+    timeEstimate: {
+      totalMinutes: totalEstimate,
+      totalHours: +(totalEstimate / 60).toFixed(1),
+      totalWorkingDays: +(totalEstimate / (60 * 6)).toFixed(1),
+    },
+  };
+}
+
+function escapeCsv(val) {
+  if (val === null || val === undefined) return '';
+  const s = String(val);
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
 app.get('/api/reports/advanced', requireAuth, async (req, res) => {
   try {
-    const { projectId, cycleId, runId, from, to } = req.query;
-    const filterP = projectId ? 'WHERE project_id = $1' : '';
-    const paramsP = projectId ? [projectId] : [];
-
-    const [totalTC, passedTC, failedTC, draftTC, reviewTC, byStatus, bySeverity, byPriority, byTipeTest, byStatusSIT, totalDef, openDef, resolvedDef, byDefStatus, byDefSeverity, byDefPriority] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP}`, paramsP),
-      pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} status = 'Passed'`, paramsP),
-      pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} status = 'Failed'`, paramsP),
-      pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} status = 'Draft'`, paramsP),
-      pool.query(`SELECT COUNT(*)::int AS total FROM test_cases ${filterP ? filterP + ' AND ' : 'WHERE '} status = 'Review'`, paramsP),
-      pool.query(`SELECT status, COUNT(*)::int AS count FROM test_cases ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY status ORDER BY count DESC`, projectId ? [projectId] : []),
-      pool.query(`SELECT severity, COUNT(*)::int AS count FROM test_cases ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY severity ORDER BY count DESC`, projectId ? [projectId] : []),
-      pool.query(`SELECT priority, COUNT(*)::int AS count FROM test_cases ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY priority ORDER BY count DESC`, projectId ? [projectId] : []),
-      pool.query(`SELECT tipe_test, COUNT(*)::int AS count FROM test_cases ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY tipe_test ORDER BY count DESC NULLS LAST`, projectId ? [projectId] : []),
-      pool.query(`SELECT status_sit, COUNT(*)::int AS count FROM test_cases ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY status_sit ORDER BY count DESC NULLS LAST`, projectId ? [projectId] : []),
-      pool.query(`SELECT COUNT(*)::int AS total FROM defects ${filterP}`, paramsP),
-      pool.query(`SELECT COUNT(*)::int AS total FROM defects ${filterP ? filterP + ' AND ' : 'WHERE '} status IN ('Open','In Progress','In Review')`, paramsP),
-      pool.query(`SELECT COUNT(*)::int AS total FROM defects ${filterP ? filterP + ' AND ' : 'WHERE '} status IN ('Resolved','Closed')`, paramsP),
-      pool.query(`SELECT status, COUNT(*)::int AS count FROM defects ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY status ORDER BY count DESC`, projectId ? [projectId] : []),
-      pool.query(`SELECT severity, COUNT(*)::int AS count FROM defects ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY severity ORDER BY count DESC`, projectId ? [projectId] : []),
-      pool.query(`SELECT priority, COUNT(*)::int AS count FROM defects ${projectId ? 'WHERE project_id = $1' : ''} GROUP BY priority ORDER BY count DESC`, projectId ? [projectId] : []),
-    ]);
-
-    const tcr = await pool.query('SELECT * FROM test_cases LIMIT 100');
-    const totalEstimate = tcr.rows.reduce((sum, tc) => sum + estimateTestCaseTime(tc), 0);
-
-    const traceability = [];
-    const reqs = await pool.query(`SELECT r.*, p.name AS project_name FROM requirements r LEFT JOIN projects p ON p.id=r.project_id ${projectId ? 'WHERE r.project_id = $1' : ''} ORDER BY r.id DESC LIMIT 30`, projectId ? [projectId] : []);
-    for (const req of reqs.rows) {
-      const linked = await pool.query(`SELECT COUNT(*)::int AS count FROM test_cases WHERE requirement_id = $1 OR user_story_coverage ILIKE $2`, [req.id, `%${req.id}%`]);
-      const defects = await pool.query(`SELECT COUNT(*)::int AS count FROM defects d JOIN test_cases tc ON tc.id = d.linked_test_case_id WHERE tc.requirement_id = $1`, [req.id]);
-      traceability.push({
-        requirementId: req.id,
-        requirementTitle: req.title,
-        projectName: req.project_name,
-        priority: req.priority,
-        status: req.status,
-        testCasesLinked: linked.rows[0].count,
-        defectsFound: defects.rows[0].count,
-        coveragePercent: Math.min(100, Math.round((linked.rows[0].count / Math.max(1, 2)) * 100)),
-      });
-    }
-
+    const { projectId } = req.query;
+    const data = await getAdvancedReportData(projectId);
     res.json({
+      ...data,
       xrayFilters: {
         projects: (await pool.query('SELECT id, name, key_code FROM projects ORDER BY name')).rows,
         users: (await pool.query('SELECT id, name, role FROM users WHERE active = TRUE ORDER BY name')).rows,
         tipeTestOptions: TIPE_TEST_OPTIONS,
         userRoleOptions: USER_ROLE_OPTIONS,
         defectWorkflow: DEFECT_WORKFLOW,
-      },
-      summary: {
-        testCasesTotal: totalTC.rows[0].total,
-        testCasesPassed: passedTC.rows[0].total,
-        testCasesFailed: failedTC.rows[0].total,
-        testCasesDraft: draftTC.rows[0].total,
-        testCasesReview: reviewTC.rows[0].total,
-        defectsTotal: totalDef.rows[0].total,
-        defectsOpen: openDef.rows[0].total,
-        defectsResolved: resolvedDef.rows[0].total,
-        passRate: totalTC.rows[0].total > 0 ? Math.round(((passedTC.rows[0].total + failedTC.rows[0].total > 0 ? passedTC.rows[0].total : 0) / Math.max(1, passedTC.rows[0].total + failedTC.rows[0].total)) * 100) : 0,
-        defectResolutionRate: totalDef.rows[0].total > 0 ? Math.round((resolvedDef.rows[0].total / totalDef.rows[0].total) * 100) : 0,
-        estimatedTotalMinutes: totalEstimate,
-      },
-      byStatus: byStatus.rows,
-      bySeverity: bySeverity.rows,
-      byPriority: byPriority.rows,
-      byTipeTest: byTipeTest.rows,
-      byStatusSIT: byStatusSIT.rows,
-      byDefectStatus: byDefStatus.rows,
-      byDefectSeverity: byDefSeverity.rows,
-      byDefectPriority: byDefPriority.rows,
-      traceability,
-      timeEstimate: {
-        totalMinutes: totalEstimate,
-        totalHours: +(totalEstimate / 60).toFixed(1),
-        totalWorkingDays: +(totalEstimate / (60 * 6)).toFixed(1),
       },
     });
   } catch (error) {
@@ -1276,11 +1458,8 @@ app.get('/api/reports/estimate', requireAuth, async (req, res) => {
 
 app.get('/api/reports/pdf', requireAuth, async (req, res) => {
   try {
-    const { projectId = '', reportType = 'summary' } = req.query;
-
-    const adv = await (await fetch(`${config.frontendUrl?.replace('5173', '4000') || 'http://localhost:4000'}/api/reports/advanced${projectId ? '?projectId=' + projectId : ''}`, {
-      headers: { Authorization: req.headers.authorization || '' },
-    })).json().catch(() => ({ summary: {}, traceability: [], byStatus: [], bySeverity: [], byDefectStatus: [] }));
+    const { projectId = '' } = req.query;
+    const adv = await getAdvancedReportData(projectId);
     const s = adv.summary || {};
 
     const doc = new PDFDocument({ margin: 40, bufferPages: true });
@@ -1289,76 +1468,697 @@ app.get('/api/reports/pdf', requireAuth, async (req, res) => {
     doc.on('end', () => {
       const pdfBuffer = Buffer.concat(chunks);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="tcms-report-${Date.now()}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="bank-ina-tcms-report-${Date.now()}.pdf"`);
       res.send(pdfBuffer);
     });
 
-    doc.fontSize(22).fillColor('#1e3a8a').text('BINA QA TCMS QA Report', { align: 'center' });
-    doc.fontSize(10).fillColor('#475569').text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
+    // Header banner
+    doc.rect(40, 40, 520, 5).fill('#e30613');
     doc.moveDown(1);
+    doc.fontSize(18).fillColor('#0b1a33').text('BANK INA DIGITAL - QA TEST MANAGEMENT REPORT', { align: 'center' });
+    doc.fontSize(10).fillColor('#64748b').text(`Generated: ${new Date().toLocaleString()} | Scope: ${projectId ? 'Project #' + projectId : 'All Projects'} | User: ${req.user.email || 'Authorized'}`, { align: 'center' });
+    doc.moveDown(1.2);
 
-    doc.fontSize(14).fillColor('#1e40af').rect(doc.x, doc.y, 60, 2).fill('#1e40af');
-    doc.moveDown(0.8);
-    doc.fontSize(14).fillColor('#1e3a8a').text('Executive Summary');
-    doc.moveDown(0.5);
+    // Executive Summary
+    doc.fontSize(13).fillColor('#e30613').text('1. EXECUTIVE SUMMARY');
+    doc.rect(40, doc.y + 2, 520, 1.5).fill('#0b1a33');
+    doc.moveDown(0.6);
+
     const summaryItems = [
-      ['Total Test Cases', s.testCasesTotal || 0],
-      ['Passed', s.testCasesPassed || 0],
-      ['Failed', s.testCasesFailed || 0],
-      ['Pass Rate', `${s.passRate || 0}%`],
-      ['Total Defects', s.defectsTotal || 0],
-      ['Open Defects', s.defectsOpen || 0],
-      ['Resolved Defects', s.defectsResolved || 0],
-      ['Resolution Rate', `${s.defectResolutionRate || 0}%`],
-      ['Est. Effort (hours)', s.estimatedTotalMinutes ? +((s.estimatedTotalMinutes || 0) / 60).toFixed(1) : 'N/A'],
+      ['Total Test Cases', String(s.testCasesTotal || 0)],
+      ['Passed', `${s.testCasesPassed || 0} (${s.passRate || 0}%)`],
+      ['Failed', String(s.testCasesFailed || 0)],
+      ['Draft / Review', `${s.testCasesDraft || 0} / ${s.testCasesReview || 0}`],
+      ['Total Defects', String(s.defectsTotal || 0)],
+      ['Open Defects', String(s.defectsOpen || 0)],
+      ['Resolved Defects', `${s.defectsResolved || 0} (${s.defectResolutionRate || 0}%)`],
+      ['Est. Effort (hours)', s.estimatedTotalMinutes ? +((s.estimatedTotalMinutes || 0) / 60).toFixed(1) + ' hrs' : 'N/A'],
     ];
+
     summaryItems.forEach(([label, value]) => {
-      doc.fontSize(10).fillColor('#334155').text(`${label}:`, { continued: true, width: 220 });
-      doc.fillColor('#0f172a').fontSize(10).text(`${value}`);
+      doc.fontSize(9.5).fillColor('#1e293b').text(`• ${label}: `, { continued: true });
+      doc.fillColor('#0b1a33').font('Helvetica-Bold').text(value).font('Helvetica');
     });
 
     doc.moveDown(1);
-    doc.fontSize(14).fillColor('#1e40af').rect(doc.x, doc.y, 60, 2).fill('#1e40af');
-    doc.moveDown(0.8);
-    doc.fontSize(14).fillColor('#1e3a8a').text('Test Cases by Status');
-    doc.moveDown(0.3);
+
+    // Projects Overview
+    if (adv.projects && adv.projects.length) {
+      doc.fontSize(13).fillColor('#e30613').text('2. PROJECTS OVERVIEW & PROGRESS');
+      doc.rect(40, doc.y + 2, 520, 1.5).fill('#0b1a33');
+      doc.moveDown(0.6);
+
+      adv.projects.forEach((p) => {
+        const dates = (p.start_date && p.end_date) ? ` (${p.start_date.toString().split('T')[0]} - ${p.end_date.toString().split('T')[0]})` : '';
+        doc.fontSize(9.5).fillColor('#0b1a33').font('Helvetica-Bold').text(`[${p.key_code}] ${p.name}${dates}`, { continued: true });
+        doc.font('Helvetica').fillColor('#64748b').text(` — Status: ${p.status} | Progress: ${p.progress || 0}% | TC: ${p.test_cases_count || 0} | Open Bugs: ${p.open_defects_count || 0}`);
+      });
+      doc.moveDown(1);
+    }
+
+    // Status breakdown
+    doc.fontSize(13).fillColor('#e30613').text('3. TEST EXECUTION & DEFECT BREAKDOWN');
+    doc.rect(40, doc.y + 2, 520, 1.5).fill('#0b1a33');
+    doc.moveDown(0.6);
+
+    doc.fontSize(10).fillColor('#0b1a33').font('Helvetica-Bold').text('Test Cases by Status:');
+    doc.font('Helvetica');
     (adv.byStatus || []).forEach((item) => {
-      doc.fontSize(10).fillColor('#334155').text(`• ${item.status}: ${item.count}`);
+      doc.fontSize(9).fillColor('#334155').text(`   - ${item.status}: ${item.count}`);
     });
+    doc.moveDown(0.5);
 
-    doc.addPage();
-    doc.fontSize(14).fillColor('#1e3a8a').text('Defects by Status');
-    doc.moveDown(0.3);
+    doc.fontSize(10).fillColor('#0b1a33').font('Helvetica-Bold').text('Defects by Status:');
+    doc.font('Helvetica');
     (adv.byDefectStatus || []).forEach((item) => {
-      doc.fontSize(10).fillColor('#334155').text(`• ${item.status}: ${item.count}`);
+      doc.fontSize(9).fillColor('#334155').text(`   - ${item.status}: ${item.count}`);
     });
 
-    doc.moveDown(1);
-    doc.fontSize(14).fillColor('#1e3a8a').text('Traceability Matrix (Requirements → Coverage)');
-    doc.moveDown(0.4);
-    const tableTop = doc.y;
-    let y = tableTop;
-    const colX = [40, 200, 400, 480];
-    doc.fontSize(9).fillColor('#ffffff').rect(40, y, 500, 18).fill('#1e3a8a');
-    doc.text('Requirement', colX[0] + 4, y + 5);
-    doc.text('Project', colX[1] + 4, y + 5);
-    doc.text('TC Linked', colX[2] + 4, y + 5);
-    doc.text('Coverage', colX[3] + 4, y + 5);
-    y += 20;
-    (adv.traceability || []).slice(0, 30).forEach((t, idx) => {
-      if (y > 760) { doc.addPage(); y = 50; }
-      doc.fillColor(idx % 2 ? '#f1f5f9' : '#ffffff').rect(40, y, 500, 16).fill(idx % 2 ? '#f1f5f9' : '#ffffff');
-      doc.fillColor('#0f172a').fontSize(8);
-      doc.text(String(t.requirementTitle || '').slice(0, 30), colX[0] + 4, y + 4);
-      doc.text(String(t.projectName || '').slice(0, 20), colX[1] + 4, y + 4);
-      doc.text(`${t.testCasesLinked || 0}`, colX[2] + 4, y + 4);
-      doc.text(`${t.coveragePercent || 0}%`, colX[3] + 4, y + 4);
-      y += 17;
-    });
+    // Traceability Matrix Page
+    if (adv.traceability && adv.traceability.length) {
+      doc.addPage();
+      doc.fontSize(13).fillColor('#e30613').text('4. REQUIREMENT TRACEABILITY MATRIX');
+      doc.rect(40, doc.y + 2, 520, 1.5).fill('#0b1a33');
+      doc.moveDown(0.8);
+
+      const colX = [40, 240, 360, 430, 490];
+      const renderTraceHeader = (curY) => {
+        doc.rect(40, curY, 520, 18).fill('#0b1a33');
+        doc.fontSize(9).fillColor('#ffffff').font('Helvetica-Bold');
+        doc.text('Requirement Title', colX[0] + 4, curY + 4);
+        doc.text('Project', colX[1] + 4, curY + 4);
+        doc.text('Priority', colX[2] + 4, curY + 4);
+        doc.text('Linked TC', colX[3] + 4, curY + 4);
+        doc.text('Coverage', colX[4] + 4, curY + 4);
+        doc.font('Helvetica');
+      };
+
+      let y = doc.y;
+      renderTraceHeader(y);
+      y += 20;
+
+      adv.traceability.slice(0, 35).forEach((t, idx) => {
+        if (y > 740) {
+          doc.addPage();
+          y = 50;
+          renderTraceHeader(y);
+          y += 20;
+        }
+        doc.rect(40, y, 520, 16).fill(idx % 2 === 0 ? '#ffffff' : '#f8fafc');
+        doc.fontSize(8.5).fillColor('#0f172a');
+        doc.text(String(t.requirementTitle || '').slice(0, 35), colX[0] + 4, y + 4);
+        doc.text(String(t.projectName || '').slice(0, 20), colX[1] + 4, y + 4);
+        doc.text(String(t.priority || ''), colX[2] + 4, y + 4);
+        doc.text(String(t.testCasesLinked || 0), colX[3] + 4, y + 4);
+        doc.text(`${t.coveragePercent || 0}%`, colX[4] + 4, y + 4);
+        y += 18;
+      });
+    }
 
     doc.end();
   } catch (error) {
     res.status(500).json({ message: error.message || 'Unable to generate PDF report.' });
+  }
+});
+
+app.get('/api/reports/csv', requireAuth, async (req, res) => {
+  try {
+    const { projectId = '' } = req.query;
+    const adv = await getAdvancedReportData(projectId);
+    const s = adv.summary || {};
+
+    const lines = [];
+    lines.push('=== BANK INA DIGITAL - QA TEST MANAGEMENT REPORT ===');
+    lines.push(`Generated,${new Date().toISOString()}`);
+    lines.push(`Scope,${projectId ? 'Project #' + projectId : 'All Projects'}`);
+    lines.push(`Requested By,${escapeCsv(req.user.email)}`);
+    lines.push('');
+
+    lines.push('=== 1. EXECUTIVE SUMMARY ===');
+    lines.push('Metric,Value');
+    lines.push(`Total Test Cases,${s.testCasesTotal || 0}`);
+    lines.push(`Passed Test Cases,${s.testCasesPassed || 0}`);
+    lines.push(`Failed Test Cases,${s.testCasesFailed || 0}`);
+    lines.push(`Draft Test Cases,${s.testCasesDraft || 0}`);
+    lines.push(`Review Test Cases,${s.testCasesReview || 0}`);
+    lines.push(`Pass Rate,${s.passRate || 0}%`);
+    lines.push(`Total Defects,${s.defectsTotal || 0}`);
+    lines.push(`Open Defects,${s.defectsOpen || 0}`);
+    lines.push(`Resolved Defects,${s.defectsResolved || 0}`);
+    lines.push(`Defect Resolution Rate,${s.defectResolutionRate || 0}%`);
+    lines.push(`Estimated Effort (Hours),${s.estimatedTotalMinutes ? +((s.estimatedTotalMinutes || 0) / 60).toFixed(1) : 0}`);
+    lines.push('');
+
+    lines.push('=== 2. PROJECTS PROGRESS & HEALTH ===');
+    lines.push('Project ID,Project Name,Key Code,Status,Priority,Start Date,End Date,Progress %,Total TC,Passed,Failed,Open Defects,Owner');
+    (adv.projects || []).forEach((p) => {
+      lines.push([
+        escapeCsv(p.id),
+        escapeCsv(p.name),
+        escapeCsv(p.key_code),
+        escapeCsv(p.status),
+        escapeCsv(p.priority || 'Medium'),
+        escapeCsv(p.start_date ? p.start_date.toString().split('T')[0] : ''),
+        escapeCsv(p.end_date ? p.end_date.toString().split('T')[0] : ''),
+        escapeCsv(`${p.progress || 0}%`),
+        escapeCsv(p.test_cases_count || 0),
+        escapeCsv(p.passed_count || 0),
+        escapeCsv(p.failed_count || 0),
+        escapeCsv(p.open_defects_count || 0),
+        escapeCsv(p.owner_name || ''),
+      ].join(','));
+    });
+    lines.push('');
+
+    lines.push('=== 3. TEST CASES STATUS DISTRIBUTION ===');
+    lines.push('Status,Count,Percentage');
+    const totalTC = Math.max(1, s.testCasesTotal || 1);
+    (adv.byStatus || []).forEach((item) => {
+      lines.push(`${escapeCsv(item.status)},${item.count},${Math.round((item.count / totalTC) * 100)}%`);
+    });
+    lines.push('');
+
+    lines.push('=== 4. DEFECTS BY STATUS ===');
+    lines.push('Status,Count');
+    (adv.byDefectStatus || []).forEach((item) => {
+      lines.push(`${escapeCsv(item.status)},${item.count}`);
+    });
+    lines.push('');
+
+    lines.push('=== 5. REQUIREMENT TRACEABILITY MATRIX ===');
+    lines.push('Requirement ID,Title,Project,Priority,Status,Test Cases Linked,Defects Found,Coverage %');
+    (adv.traceability || []).forEach((t) => {
+      lines.push([
+        escapeCsv(t.requirementId),
+        escapeCsv(t.requirementTitle),
+        escapeCsv(t.projectName),
+        escapeCsv(t.priority),
+        escapeCsv(t.status),
+        escapeCsv(t.testCasesLinked),
+        escapeCsv(t.defectsFound),
+        escapeCsv(`${t.coveragePercent}%`),
+      ].join(','));
+    });
+    lines.push('');
+
+    lines.push('=== 6. TEST CYCLES ===');
+    lines.push('Cycle ID,Name,Project,Status,Owner,Planned Start,Planned End,Total Cases,Passed,Failed,Progress %');
+    (adv.cycles || []).forEach((c) => {
+      lines.push([
+        escapeCsv(c.id),
+        escapeCsv(c.name),
+        escapeCsv(c.project_name),
+        escapeCsv(c.status),
+        escapeCsv(c.owner_name || ''),
+        escapeCsv(c.planned_start ? c.planned_start.toString().split('T')[0] : ''),
+        escapeCsv(c.planned_end ? c.planned_end.toString().split('T')[0] : ''),
+        escapeCsv(c.total_cases || 0),
+        escapeCsv(c.passed_cases || 0),
+        escapeCsv(c.failed_cases || 0),
+        escapeCsv(`${c.progress || 0}%`),
+      ].join(','));
+    });
+
+    const csvContent = lines.join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="bank-ina-tcms-report-${Date.now()}.csv"`);
+    res.send(csvContent);
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to generate CSV report.' });
+  }
+});
+
+app.get('/api/reports/html', requireAuth, async (req, res) => {
+  try {
+    const { projectId = '' } = req.query;
+    const adv = await getAdvancedReportData(projectId);
+    const s = adv.summary || {};
+
+    const projectName = projectId
+      ? ((adv.projects || []).find((p) => String(p.id) === String(projectId))?.name || `Project #${projectId}`)
+      : 'All Projects';
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bank Ina Digital QA Analytics Report - ${projectName}</title>
+  <style>
+    :root {
+      --ina-navy: #0b1a33;
+      --ina-navy-2: #122545;
+      --ina-red: #e30613;
+      --ina-red-dark: #b91c1c;
+      --ina-gold: #c5a86a;
+      --ina-green: #059669;
+      --ina-amber: #d97706;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #0b1a33;
+      --text-muted: #64748b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    .report-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(11,26,51,0.08);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .report-header {
+      background: linear-gradient(135deg, #0b1a33 0%, #122545 60%, #1e3a5f 100%);
+      color: white;
+      padding: 30px;
+      position: relative;
+      border-bottom: 4px solid var(--ina-red);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+    .brand-title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-badge {
+      background: var(--ina-red);
+      color: white;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+    .header-meta {
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-top: 8px;
+    }
+    .actions-bar {
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      background: var(--ina-red);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 13px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .btn:hover { opacity: 0.9; }
+    .report-body { padding: 30px; }
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ina-navy);
+      margin: 28px 0 14px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 2px solid #f1f5f9;
+      padding-bottom: 8px;
+    }
+    .section-title:first-child { margin-top: 0; }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+      transition: transform 0.2s;
+    }
+    .kpi-value {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--ina-navy);
+      line-height: 1.1;
+    }
+    .kpi-value.green { color: var(--ina-green); }
+    .kpi-value.red { color: var(--ina-red); }
+    .kpi-value.gold { color: var(--ina-gold); }
+    .kpi-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+      margin-top: 6px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: #f1f5f9;
+      color: var(--ina-navy);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    tr:hover td { background: #fff1f2; }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-pass { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .badge-fail { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    .badge-active { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+    .progress-bar-bg {
+      background: #e2e8f0;
+      height: 8px;
+      border-radius: 4px;
+      overflow: hidden;
+      width: 100%;
+      max-width: 140px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #059669, #10b981);
+      border-radius: 4px;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 768px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+    @media print {
+      body { background: white; padding: 0; }
+      .report-container { box-shadow: none; border: none; }
+      .actions-bar { display: none; }
+      .btn { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="report-container">
+    <header class="report-header">
+      <div class="header-top">
+        <div>
+          <div class="brand-title">
+            <span>BANK INA DIGITAL</span>
+            <span class="brand-badge">QA Analytics Report</span>
+          </div>
+          <div class="header-meta">
+            Scope: <strong>${projectName}</strong> • Generated on: ${new Date().toLocaleString()} • Exported for Stakeholder Review
+          </div>
+        </div>
+        <div class="actions-bar">
+          <button class="btn btn-secondary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+          <a class="btn" href="/api/reports/csv${projectId ? '?projectId=' + projectId : ''}" download>📊 Download CSV</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="report-body">
+      <h2 class="section-title">1. Executive Summary & Quality Health</h2>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-value">${s.testCasesTotal || 0}</div>
+          <div class="kpi-label">Total Test Cases</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value green">${s.testCasesPassed || 0}</div>
+          <div class="kpi-label">Passed</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value red">${s.testCasesFailed || 0}</div>
+          <div class="kpi-label">Failed</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value green">${s.passRate || 0}%</div>
+          <div class="kpi-label">Pass Rate</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value red">${s.defectsTotal || 0}</div>
+          <div class="kpi-label">Total Defects</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value red">${s.defectsOpen || 0}</div>
+          <div class="kpi-label">Open Defects</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value green">${s.defectsResolved || 0}</div>
+          <div class="kpi-label">Resolved</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value gold">${s.defectResolutionRate || 0}%</div>
+          <div class="kpi-label">Resolution Rate</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-value">${s.estimatedTotalMinutes ? +((s.estimatedTotalMinutes || 0) / 60).toFixed(1) : 0}h</div>
+          <div class="kpi-label">Estimated Effort</div>
+        </div>
+      </div>
+
+      <h2 class="section-title">2. Projects Progress & Delivery Timelines</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Project Name</th>
+            <th>Status</th>
+            <th>Timeline</th>
+            <th>Progress</th>
+            <th>Test Cases</th>
+            <th>Open Bugs</th>
+            <th>Lead</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(adv.projects || []).map((p) => `
+            <tr>
+              <td><strong>${p.key_code}</strong></td>
+              <td>${p.name}</td>
+              <td><span class="badge badge-active">${p.status}</span></td>
+              <td>${(p.start_date && p.end_date) ? p.start_date.toString().split('T')[0] + ' ➔ ' + p.end_date.toString().split('T')[0] : 'Ongoing'}</td>
+              <td>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${p.progress || 0}%"></div></div>
+                  <strong>${p.progress || 0}%</strong>
+                </div>
+              </td>
+              <td>${p.test_cases_count || 0} (${p.passed_count || 0} passed)</td>
+              <td><strong style="color:var(--ina-red)">${p.open_defects_count || 0}</strong></td>
+              <td>${p.owner_name || '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <div class="two-col" style="margin-top: 24px;">
+        <div>
+          <h2 class="section-title">3. Test Cases by Status</h2>
+          <table>
+            <thead><tr><th>Status</th><th>Count</th><th>%</th></tr></thead>
+            <tbody>
+              ${(adv.byStatus || []).map((b) => `
+                <tr>
+                  <td>${b.status}</td>
+                  <td><strong>${b.count}</strong></td>
+                  <td>${Math.round((b.count / Math.max(1, s.testCasesTotal || 1)) * 100)}%</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h2 class="section-title">4. Defects by Status</h2>
+          <table>
+            <thead><tr><th>Status</th><th>Count</th><th>%</th></tr></thead>
+            <tbody>
+              ${(adv.byDefectStatus || []).map((d) => `
+                <tr>
+                  <td>${d.status}</td>
+                  <td><strong>${d.count}</strong></td>
+                  <td>${Math.round((d.count / Math.max(1, s.defectsTotal || 1)) * 100)}%</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <h2 class="section-title">5. Requirement Traceability Matrix</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Requirement Title</th>
+            <th>Project</th>
+            <th>Priority</th>
+            <th>Status</th>
+            <th>Test Cases Linked</th>
+            <th>Defects Found</th>
+            <th>Coverage</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(adv.traceability || []).map((t) => `
+            <tr>
+              <td><strong>${t.requirementTitle}</strong></td>
+              <td>${t.projectName}</td>
+              <td>${t.priority}</td>
+              <td><span class="badge badge-pass">${t.status}</span></td>
+              <td>${t.testCasesLinked}</td>
+              <td>${t.defectsFound}</td>
+              <td><strong>${t.coveragePercent}%</strong></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <h2 class="section-title">6. Test Execution Cycles</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Cycle Name</th>
+            <th>Project</th>
+            <th>Status</th>
+            <th>Owner</th>
+            <th>Timeline</th>
+            <th>Executed</th>
+            <th>Passed</th>
+            <th>Failed</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(adv.cycles || []).map((c) => `
+            <tr>
+              <td><strong>${c.name}</strong></td>
+              <td>${c.project_name}</td>
+              <td><span class="badge badge-active">${c.status}</span></td>
+              <td>${c.owner_name || '-'}</td>
+              <td>${(c.planned_start && c.planned_end) ? c.planned_start.toString().split('T')[0] + ' ➔ ' + c.planned_end.toString().split('T')[0] : '-'}</td>
+              <td>${c.total_cases || 0}</td>
+              <td><span style="color:var(--ina-green); font-weight:700;">${c.passed_cases || 0}</span></td>
+              <td><span style="color:var(--ina-red); font-weight:700;">${c.failed_cases || 0}</span></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </main>
+  </div>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="bank-ina-tcms-report-${Date.now()}.html"`);
+    res.send(html);
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to generate HTML report.' });
+  }
+});
+
+app.get('/api/gantt', requireAuth, async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const cleanProjectId = safeInt(projectId);
+
+    const [projects, milestones, cycles, runs] = await Promise.all([
+      pool.query(`
+        SELECT p.id, p.name, p.key_code, p.status, p.priority, p.start_date, p.end_date, p.progress, p.budget_hours,
+               u.name AS owner_name,
+               (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id) AS test_cases_count,
+               (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Passed' OR tc.status_sit = 'Passed')) AS passed_count,
+               (SELECT COUNT(*)::int FROM test_cases tc WHERE tc.project_id = p.id AND (tc.status = 'Failed' OR tc.status_sit = 'Failed')) AS failed_count
+        FROM projects p
+        LEFT JOIN users u ON u.id = p.owner_id
+        ${cleanProjectId ? 'WHERE p.id = $1' : ''}
+        ORDER BY p.start_date ASC NULLS LAST, p.id ASC
+      `, cleanProjectId ? [cleanProjectId] : []),
+      pool.query(`
+        SELECT m.id, m.project_id, p.name AS project_name, p.key_code AS project_key,
+               m.name, m.description, m.status, m.start_date, m.due_date, m.progress
+        FROM milestones m
+        JOIN projects p ON p.id = m.project_id
+        ${cleanProjectId ? 'WHERE m.project_id = $1' : ''}
+        ORDER BY m.start_date ASC NULLS LAST, m.due_date ASC NULLS LAST
+      `, cleanProjectId ? [cleanProjectId] : []),
+      pool.query(`
+        SELECT c.id, c.project_id, p.name AS project_name, p.key_code AS project_key,
+               c.name, c.status, c.planned_start, c.planned_end, c.progress, c.estimated_minutes, c.actual_minutes,
+               u.name AS owner_name,
+               (SELECT COUNT(*)::int FROM cycle_cases cc WHERE cc.cycle_id = c.id) AS total_cases,
+               (SELECT COUNT(*)::int FROM cycle_cases cc WHERE cc.cycle_id = c.id AND cc.status = 'Passed') AS passed_cases,
+               (SELECT COUNT(*)::int FROM cycle_cases cc WHERE cc.cycle_id = c.id AND cc.status = 'Failed') AS failed_cases
+        FROM test_cycles c
+        JOIN projects p ON p.id = c.project_id
+        LEFT JOIN users u ON u.id = c.owner_id
+        ${cleanProjectId ? 'WHERE c.project_id = $1' : ''}
+        ORDER BY c.planned_start ASC NULLS LAST, c.id ASC
+      `, cleanProjectId ? [cleanProjectId] : []),
+      pool.query(`
+        SELECT tr.id, tr.project_id, p.name AS project_name, p.key_code AS project_key,
+               tr.name, tr.status, tr.planned_start, tr.actual_end, tr.estimated_minutes, tr.actual_minutes,
+               u.name AS created_by_name,
+               (SELECT COUNT(*)::int FROM test_run_results rr WHERE rr.run_id = tr.id) AS total_cases,
+               (SELECT COUNT(*)::int FROM test_run_results rr WHERE rr.run_id = tr.id AND rr.status = 'Passed') AS passed_cases
+        FROM test_runs tr
+        JOIN projects p ON p.id = tr.project_id
+        LEFT JOIN users u ON u.id = tr.created_by
+        ${cleanProjectId ? 'WHERE tr.project_id = $1' : ''}
+        ORDER BY tr.planned_start ASC NULLS LAST, tr.id ASC
+      `, cleanProjectId ? [cleanProjectId] : []),
+    ]);
+
+    res.json({
+      projectId: cleanProjectId || null,
+      projects: projects.rows,
+      milestones: milestones.rows,
+      cycles: cycles.rows,
+      runs: runs.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Unable to fetch Gantt chart data.' });
   }
 });
 
@@ -1430,14 +2230,47 @@ app.get('/api/dashboard/overview', requireAuth, async (req, res) => {
  * CRUD completion layer — Update / Delete for every entity (Phase 1)
  * ==========================================================================*/
 
-const EXECUTION_STATUSES = ['Not Executed', 'Passed', 'Failed', 'Retest', 'Blocked', 'Skipped'];
+const EXECUTION_STATUSES = ['Not Executed', 'In Progress Test', 'Passed', 'Failed', 'Retest', 'Blocked', 'Skipped'];
 
 async function updateRow(tableName, columnMap, body, id) {
   const sets = [];
   const values = [];
   for (const [apiKey, column] of Object.entries(columnMap)) {
     if (body[apiKey] !== undefined) {
-      values.push(body[apiKey]);
+      let val = body[apiKey];
+
+      const isNullableNumericOrDate = column.endsWith('_id') ||
+        column.endsWith('_date') ||
+        column.endsWith('_start') ||
+        column.endsWith('_end') ||
+        column.endsWith('_at') ||
+        column.endsWith('_minutes') ||
+        column === 'due_date' ||
+        column === 'date_sit_executed' ||
+        column === 'date_sit_done' ||
+        column === 'planned_start' ||
+        column === 'planned_end' ||
+        column === 'actual_end' ||
+        column === 'start_date' ||
+        column === 'end_date' ||
+        column === 'estimated_minutes' ||
+        column === 'actual_minutes' ||
+        column === 'elapsed_minutes' ||
+        column === 'progress' ||
+        column === 'budget_hours';
+
+      if (val === '' || (typeof val === 'string' && val.trim() === '')) {
+        if (isNullableNumericOrDate) {
+          val = null;
+        }
+      } else if (isNullableNumericOrDate && (column.endsWith('_id') || column.endsWith('_minutes') || column === 'progress' || column === 'budget_hours')) {
+        const num = parseInt(val, 10);
+        val = isNaN(num) ? null : num;
+      } else if (isNullableNumericOrDate && (column.endsWith('_date') || column === 'due_date' || column === 'date_sit_executed' || column === 'date_sit_done' || column === 'start_date' || column === 'end_date')) {
+        val = safeDate(val);
+      }
+
+      values.push(val);
       sets.push(`${column} = $${values.length}`);
     }
   }
@@ -1450,7 +2283,10 @@ async function updateRow(tableName, columnMap, body, id) {
   return { row: result.rows[0] || null, empty: false };
 }
 
-const PROJECT_COLUMNS = { name: 'name', keyCode: 'key_code', description: 'description', status: 'status', ownerId: 'owner_id' };
+const PROJECT_COLUMNS = {
+  name: 'name', keyCode: 'key_code', description: 'description', status: 'status', ownerId: 'owner_id',
+  startDate: 'start_date', endDate: 'end_date', progress: 'progress', priority: 'priority', budgetHours: 'budget_hours',
+};
 const REQUIREMENT_COLUMNS = {
   projectId: 'project_id', title: 'title', description: 'description', status: 'status',
   priority: 'priority', source: 'source', userStory: 'user_story', acceptanceCriteria: 'acceptance_criteria',
@@ -1468,8 +2304,16 @@ const TEST_CASE_COLUMNS = {
   suiteId: 'suite_id', milestoneId: 'milestone_id', reviewStatus: 'review_status',
   preconditions: 'preconditions',
 };
-const TEST_CYCLE_COLUMNS = { projectId: 'project_id', name: 'name', status: 'status', ownerId: 'owner_id', summary: 'summary', planId: 'plan_id' };
-const TEST_RUN_COLUMNS = { projectId: 'project_id', name: 'name', status: 'status', summary: 'summary' };
+const TEST_CYCLE_COLUMNS = {
+  projectId: 'project_id', name: 'name', status: 'status', ownerId: 'owner_id', summary: 'summary',
+  planId: 'plan_id', progress: 'progress', plannedStart: 'planned_start', plannedEnd: 'planned_end',
+  estimatedMinutes: 'estimated_minutes', actualMinutes: 'actual_minutes',
+};
+const TEST_RUN_COLUMNS = {
+  projectId: 'project_id', name: 'name', status: 'status', summary: 'summary',
+  plannedStart: 'planned_start', actualEnd: 'actual_end',
+  estimatedMinutes: 'estimated_minutes', actualMinutes: 'actual_minutes',
+};
 const DEFECT_COLUMNS = {
   projectId: 'project_id', title: 'title', description: 'description', severity: 'severity',
   priority: 'priority', status: 'status', assigneeId: 'assignee_id', linkedTestCaseId: 'linked_test_case_id',
@@ -1505,7 +2349,20 @@ function registerUpdateDelete(path, table, columns, roles, beforeDelete = null) 
   });
 }
 
-registerUpdateDelete('projects', 'projects', PROJECT_COLUMNS, ['qa_lead', 'pm']);
+registerUpdateDelete('projects', 'projects', PROJECT_COLUMNS, ['qa_lead', 'pm'], async (id) => {
+  await pool.query('DELETE FROM cycle_cases WHERE cycle_id IN (SELECT id FROM test_cycles WHERE project_id = $1)', [id]);
+  await pool.query('DELETE FROM test_run_results WHERE run_id IN (SELECT id FROM test_runs WHERE project_id = $1)', [id]);
+  await pool.query('DELETE FROM defects WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM test_case_steps WHERE test_case_id IN (SELECT id FROM test_cases WHERE project_id = $1)', [id]);
+  await pool.query('DELETE FROM test_cases WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM test_runs WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM test_cycles WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM test_plans WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM milestones WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM test_suites WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM requirement_documents WHERE project_id = $1', [id]);
+  await pool.query('DELETE FROM requirements WHERE project_id = $1', [id]);
+});
 registerUpdateDelete('requirements', 'requirements', REQUIREMENT_COLUMNS, ['qa_lead', 'pm', 'product', 'business_analyst'], async (id) => {
   await pool.query('UPDATE test_cases SET requirement_id = NULL WHERE requirement_id = $1', [id]);
 });
@@ -1525,7 +2382,10 @@ registerUpdateDelete('defects', 'defects', DEFECT_COLUMNS, ['qa_lead', 'qa_engin
  * ==========================================================================*/
 
 const SUITE_COLUMNS = { projectId: 'project_id', parentId: 'parent_id', name: 'name', description: 'description' };
-const MILESTONE_COLUMNS = { projectId: 'project_id', name: 'name', description: 'description', status: 'status', dueDate: 'due_date' };
+const MILESTONE_COLUMNS = {
+  projectId: 'project_id', name: 'name', description: 'description', status: 'status',
+  dueDate: 'due_date', startDate: 'start_date', progress: 'progress',
+};
 const PLAN_COLUMNS = { projectId: 'project_id', milestoneId: 'milestone_id', name: 'name', description: 'description', status: 'status' };
 
 registerUpdateDelete('suites', 'test_suites', SUITE_COLUMNS, ['qa_lead', 'qa_engineer', 'pm', 'product']);
@@ -1598,12 +2458,12 @@ app.get('/api/milestones', requireAuth, async (req, res) => {
 });
 
 app.post('/api/milestones', requireAuth, requireRoles('qa_lead', 'pm', 'product'), async (req, res) => {
-  const { projectId, name, description, status = 'Open', dueDate } = req.body || {};
+  const { projectId, name, description, status = 'Open', dueDate, startDate, progress = 0 } = req.body || {};
   if (!projectId || !name) return res.status(400).json({ message: 'Project and milestone name are required.' });
   try {
     const result = await pool.query(
-      `INSERT INTO milestones (project_id, name, description, status, due_date) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [projectId, name, description || '', status, dueDate || null]
+      `INSERT INTO milestones (project_id, name, description, status, due_date, start_date, progress) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [safeInt(projectId), name.trim(), description || '', status, safeDate(dueDate), safeDate(startDate), Math.max(0, Math.min(100, safeInt(progress) || 0))]
     );
     await logActivity(req.user.sub, 'milestone', result.rows[0].id, 'create', `Created milestone ${name}`);
     res.status(201).json({ milestone: result.rows[0] });

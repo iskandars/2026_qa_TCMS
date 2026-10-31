@@ -10,6 +10,9 @@ test.describe('VIDEO 13 - Traceability Matrix Demo', () => {
   test('13a - page header and coverage KPIs', async ({ page }) => {
     await expect(page.getByRole('heading', { name: /Requirement Traceability Matrix/i })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
+    await expect(page.locator('.error-box')).toHaveCount(0);
+    await expect(page.locator('.kpi-item')).toHaveCount(5);
+    await expect(page.getByRole('heading', { name: /Uncovered Test Cases/i })).toBeVisible();
 
     const kpis = page.locator('.kpi-item');
     const count = Math.min(await kpis.count(), 5);
@@ -21,6 +24,7 @@ test.describe('VIDEO 13 - Traceability Matrix Demo', () => {
   });
 
   test('13b - requirement to test case linkage table', async ({ page }) => {
+    await expect(page.locator('.scroll-x').first().getByRole('columnheader')).toHaveCount(9);
     const cols = ['Requirement', 'Project', 'Priority', 'Status', 'TC Linked',
       'Approved', 'Passed', 'Coverage', 'Linked Cases'];
     for (const col of cols) {

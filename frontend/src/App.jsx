@@ -25,17 +25,17 @@ const initialCredentials = {
 
 const workflowStatus = ['Open', 'In Progress', 'In Review', 'Rejected', 'Resolved', 'Closed'];
 const navItems = [
-  'overview', 'requirements', 'test-cases', 'test-suites', 'test-plans', 'test-cycles',
+  'overview', 'projects', 'gantt', 'requirements', 'test-cases', 'test-suites', 'test-plans', 'test-cycles',
   'test-runs', 'execution-board', 'defects', 'traceability', 'reports', 'activity', 'admin',
 ];
 const navLabels = {
-  overview: 'Overview', requirements: 'Requirements', 'test-cases': 'Test Cases',
+  overview: 'Overview', projects: 'Projects', gantt: 'Gantt Chart', requirements: 'Requirements', 'test-cases': 'Test Cases',
   'test-suites': 'Test Suites', 'test-plans': 'Test Plans', 'test-cycles': 'Test Cycles',
   'test-runs': 'Test Runs', 'execution-board': 'Execution Board', defects: 'Defects',
   traceability: 'Traceability', reports: 'Reports', activity: 'Activity', admin: 'Admin',
 };
 const reviewStatuses = ['Draft', 'In Review', 'Approved', 'Rejected', 'Deprecated'];
-const executionStatuses = ['Not Executed', 'Passed', 'Failed', 'Retest', 'Blocked', 'Skipped'];
+const executionStatuses = ['Not Executed', 'In Progress Test', 'Passed', 'Failed', 'Retest', 'Blocked', 'Skipped'];
 const runResultStatuses = ['Not Run', 'Passed', 'Failed', 'Blocked', 'Retest', 'Skipped'];
 const testCaseStatuses = ['Draft', 'Review', 'Ready', 'Deprecated', 'Passed', 'Failed'];
 const testCaseSeverities = ['Trivial', 'Minor', 'Major', 'Critical'];
@@ -54,6 +54,10 @@ function formatMinutes(mins) {
   const h = Math.floor(m / 60);
   const rm = m % 60;
   return `${h}h ${rm}m`;
+}
+
+function dateFieldValue(value) {
+  return value ? String(value).slice(0, 10) : '';
 }
 
 function getAuthHeaders(token) {
@@ -140,6 +144,13 @@ export default function App() {
 
   const [newRequirement, setNewRequirement] = useState({ projectId: '', title: '', description: '', priority: 'High', source: 'Business', userStory: '', acceptanceCriteria: '' });
   const [newCycle, setNewCycle] = useState({ projectId: '', name: '', status: 'Planned', summary: '' });
+  const [projectForm, setProjectForm] = useState({ name: '', keyCode: '', description: '', status: 'Active', priority: 'Medium', startDate: '', endDate: '', progress: 0, budgetHours: 0, ownerId: '' });
+  const [showProjectForm, setShowProjectForm] = useState(false);
+  const [ganttData, setGanttData] = useState({ projects: [], milestones: [], cycles: [], runs: [] });
+  const [ganttProjectFilter, setGanttProjectFilter] = useState('');
+  const [ganttScale, setGanttScale] = useState('week');
+  const [ganttMilestoneDraft, setGanttMilestoneDraft] = useState({ projectId: '', name: '', description: '', status: 'Open', startDate: '', dueDate: '', progress: 0 });
+  const [showGanttMilestoneForm, setShowGanttMilestoneForm] = useState(false);
   const [newTestCase, setNewTestCase] = useState({
     projectId: '', code: '', title: '', summary: '', status: 'Draft', severity: 'Major', priority: 'Medium',
     assigneeId: '', tags: '', steps: '', expectedResult: '',
@@ -177,7 +188,6 @@ export default function App() {
   const [runResults, setRunResults] = useState([]);
   const [reportExtra, setReportExtra] = useState({ coverage: null, trend: null, traceability: null });
   const [activity, setActivity] = useState([]);
-
   const userRole = user?.role || selectedRole;
 
   const summaryCards = useMemo(() => {
@@ -197,6 +207,8 @@ export default function App() {
   const canUploadRequirements = hasPerm(permissions, 'upload_requirements') || ['qa_lead', 'qa_engineer', 'pm', 'product', 'business_analyst'].includes(userRole);
   const canExportReports = hasPerm(permissions, 'export_reports') || true;
   const canManageCycles = hasPerm(permissions, 'manage_cycles') || ['qa_lead', 'pm'].includes(userRole);
+  const canManageProjects = ['qa_lead', 'pm'].includes(userRole);
+  const canManageTimeline = ['qa_lead', 'pm', 'product'].includes(userRole);
   const canCreateDefects = ['qa_lead', 'qa_engineer'].includes(userRole);
   const isAdmin = userRole === 'qa_lead';
 
@@ -268,6 +280,23 @@ export default function App() {
     }
   };
 
+  const loadGantt = async (projectId = '') => {
+    try {
+      const params = new URLSearchParams();
+      if (projectId) params.set('projectId', projectId);
+      const query = params.toString();
+      const response = await axios.get(`${API_URL}/gantt${query ? `?${query}` : ''}`, { headers: getAuthHeaders(token) });
+      setGanttData({
+        projects: response.data.projects || [],
+        milestones: response.data.milestones || [],
+        cycles: response.data.cycles || [],
+        runs: response.data.runs || [],
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not load Gantt chart data.');
+    }
+  };
+
   useEffect(() => {
     if (!token) {
       setData({
@@ -283,6 +312,10 @@ export default function App() {
     }
     loadDashboard();
   }, [token]);
+
+  useEffect(() => {
+    if (token && activeTab === 'gantt') loadGantt(ganttProjectFilter);
+  }, [token, activeTab, ganttProjectFilter]);
 
   const statusSummary = useMemo(() => {
     const summaryMap = Object.fromEntries((data.overview?.byStatus || []).map((item) => [item.status, item.count]));
@@ -337,6 +370,27 @@ export default function App() {
     localStorage.removeItem('tcmsUser');
     localStorage.removeItem('tcmsPerms');
     setToken(''); setUser(null); setPermissions([]); setError(''); setInfo('');
+  };
+
+  const createProject = async () => {
+    if (!canManageProjects) { setError('Only QA Lead or PM can manage projects.'); return; }
+    if (!projectForm.name.trim() || !projectForm.keyCode.trim()) {
+      setError('Project name and project key are required.');
+      return;
+    }
+    try {
+      await axios.post(`${API_URL}/projects`, {
+        ...projectForm,
+        progress: Number(projectForm.progress) || 0,
+        budgetHours: Number(projectForm.budgetHours) || 0,
+      }, { headers: getAuthHeaders(token) });
+      setProjectForm({ name: '', keyCode: '', description: '', status: 'Active', priority: 'Medium', startDate: '', endDate: '', progress: 0, budgetHours: 0, ownerId: user?.id || '' });
+      setShowProjectForm(false);
+      notify('Project created.');
+      await loadDashboard();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not create project.');
+    }
   };
 
   const createRequirement = async () => {
@@ -422,6 +476,7 @@ export default function App() {
       setEditing(null);
       notify('Record updated.');
       await loadDashboard();
+      if (activeTab === 'gantt') await loadGantt(ganttProjectFilter);
     } catch (err) { setError(err.response?.data?.message || 'Could not update record.'); }
   };
 
@@ -431,6 +486,7 @@ export default function App() {
       await axios.delete(`${API_URL}/${entity}/${id}`, { headers: getAuthHeaders(token) });
       notify('Record deleted.');
       await loadDashboard();
+      if (activeTab === 'gantt') await loadGantt(ganttProjectFilter);
     } catch (err) { setError(err.response?.data?.message || 'Could not delete record.'); }
   };
 
@@ -452,6 +508,26 @@ export default function App() {
       notify('Milestone created.');
       await loadDashboard();
     } catch (err) { setError(err.response?.data?.message || 'Could not create milestone.'); }
+  };
+
+  const createGanttMilestone = async () => {
+    if (!canManageTimeline) { setError('Only QA Lead, PM, or Product can manage milestones.'); return; }
+    if (!ganttMilestoneDraft.projectId || !ganttMilestoneDraft.name.trim()) {
+      setError('Project and milestone name are required.');
+      return;
+    }
+    try {
+      await axios.post(`${API_URL}/milestones`, {
+        ...ganttMilestoneDraft,
+        progress: Number(ganttMilestoneDraft.progress) || 0,
+      }, { headers: getAuthHeaders(token) });
+      setGanttMilestoneDraft({ projectId: ganttProjectFilter, name: '', description: '', status: 'Open', startDate: '', dueDate: '', progress: 0 });
+      setShowGanttMilestoneForm(false);
+      notify('Gantt milestone created.');
+      await Promise.all([loadDashboard(), loadGantt(ganttProjectFilter)]);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not create Gantt milestone.');
+    }
   };
 
   const createPlan = async () => {
@@ -1568,7 +1644,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="reports-filters">
+      <div className="reports-filters filters-three-column test-case-filters">
         <div>
           <label>Project</label>
           <select value={filters.projectId} onChange={(e) => setFilters({ ...filters, projectId: e.target.value })}>
@@ -1759,7 +1835,7 @@ export default function App() {
           <button className="primary-button small" onClick={generateScenarios} disabled={!canGenerateScenarios}>Generate Scenarios</button>
           {data.generatedScenarios?.length > 0 && (
             <>
-              <button className="secondary-button small" onClick={saveGeneratedScenarios} disabled={!canWriteTC && !canBulkImport}>Save Scenarios ({selectedScenarios.length || 'all'})</button>
+              <button className="secondary-button small" onClick={saveGeneratedScenarios} disabled={!canWriteTC && !canBulkImport}>Save Scenarios ({selectedScenarios.length || data.generatedScenarios.length})</button>
               <button className="ghost-button small" onClick={() => setSelectedScenarios(data.generatedScenarios.map((_, i) => i))}>Select All</button>
               <button className="ghost-button small" onClick={() => setSelectedScenarios([])}>Clear Selection</button>
               <button className="ghost-button small" onClick={() => setData((d) => ({ ...d, generatedScenarios: [] }))}>Discard</button>
@@ -2066,7 +2142,7 @@ export default function App() {
       </div>
 
       <div className="kanban-grid">
-        {['Not Executed', 'Passed', 'Failed', 'Retest'].map((phase) => (
+        {['Not Executed', 'In Progress Test', 'Passed', 'Failed', 'Retest'].map((phase) => (
           <div key={phase} className="kanban-column">
             <div className="kanban-header">{phase} ({(data.executions || []).filter((i) => i.status === phase).length})</div>
             {(data.executions || []).filter((item) => item.status === phase).slice(0, 12).map((item) => (
@@ -2137,7 +2213,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="reports-filters">
+      <div className="reports-filters filters-two-column defect-filters">
         <div>
           <label>Project</label>
           <select value={filters.projectId} onChange={(e) => setFilters({ ...filters, projectId: e.target.value })}>
@@ -2149,7 +2225,7 @@ export default function App() {
           <label>Status</label>
           <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
             <option value="">All</option>
-            {(data.workflow || workflowStatus).map((s) => <option key={s} value={s}>{s}</option>)}
+            {(data.workflow || workflowStatus).map((status) => <option key={status} value={status}>{status}</option>)}
           </select>
         </div>
         <div>
@@ -2220,6 +2296,7 @@ export default function App() {
     const adv = data.advanced;
     const est = data.estimate;
     const tcFilters = filters;
+    const reportTraceabilityRows = Array.isArray(adv?.traceability) ? adv.traceability : [];
     return (
       <div className="panel full-height-panel">
         <div className="panel-header">
@@ -2246,7 +2323,7 @@ export default function App() {
           ))}
         </div>
 
-        <div className="reports-filters">
+        <div className="reports-filters filters-three-column report-filters">
           <div>
             <label>Project</label>
             <select value={tcFilters.projectId} onChange={(e) => { setFilters({ ...filters, projectId: e.target.value }); setEstimateScope({ ...estimateScope, projectId: e.target.value }); }}>
@@ -2419,22 +2496,27 @@ export default function App() {
                   <th>Priority</th>
                   <th>Status</th>
                   <th>TC Linked</th>
-                  <th>Defects Found</th>
+                  <th>Approved</th>
+                  <th>Passed</th>
                   <th>Coverage</th>
+                  <th>Linked Cases</th>
                 </tr>
               </thead>
               <tbody>
-                {(adv.traceability || []).map((t, idx) => (
+                {reportTraceabilityRows.map((t, idx) => (
                   <tr key={idx}>
-                    <td>{t.requirementTitle}</td>
+                    <td><strong>{t.requirementTitle}</strong></td>
                     <td>{t.projectName}</td>
                     <td>{t.priority}</td>
                     <td><span className="status-badge status-pass">{t.status}</span></td>
                     <td>{t.testCasesLinked}</td>
-                    <td>{t.defectsFound}</td>
+                    <td>{t.approvedCount}</td>
+                    <td>{t.passedCount}</td>
                     <td><strong>{t.coveragePercent}%</strong></td>
+                    <td>{(t.testCases || []).map((tc) => <span key={tc.id} className="chip">{tc.code}</span>)}</td>
                   </tr>
                 ))}
+                {!reportTraceabilityRows.length && <tr><td colSpan="9">No requirements found.</td></tr>}
               </tbody>
             </table>
             </div>
@@ -2885,9 +2967,17 @@ export default function App() {
   );
 
   const renderTraceability = () => {
-    const t = reportExtra.traceability || { traceability: [], uncoveredCases: [], summary: {} };
-    const rows = t.traceability || [];
-    const summary = t.summary || {};
+    const t = reportExtra.traceability && typeof reportExtra.traceability === 'object'
+      ? reportExtra.traceability
+      : {};
+    const rows = Array.isArray(t.traceability) ? t.traceability : [];
+    const uncoveredCases = Array.isArray(t.uncoveredCases) ? t.uncoveredCases : [];
+    const summary = t.summary && typeof t.summary === 'object' ? t.summary : {};
+    const totalRequirements = Number(summary.totalRequirements ?? rows.length) || 0;
+    const coveredRequirements = Number(summary.coveredRequirements ?? rows.filter((row) => Number(row.case_count) > 0).length) || 0;
+    const totalCases = Number(summary.totalCases ?? rows.reduce((total, row) => total + (Number(row.case_count) || 0), 0)) || 0;
+    const uncoveredCount = Number(summary.uncoveredCases ?? uncoveredCases.length) || 0;
+    const coveragePercent = totalRequirements ? Math.round((coveredRequirements / totalRequirements) * 100) : 0;
     return (
       <div className="panel full-height-panel">
         <div className="panel-header with-actions">
@@ -2901,12 +2991,12 @@ export default function App() {
         </div>
 
         <section className="kpi-row">
-          <div className="kpi-item"><strong>{summary.totalRequirements || 0}</strong><small>Requirements</small></div>
-          <div className="kpi-item"><strong>{summary.coveredRequirements || 0}</strong><small>Covered</small></div>
-          <div className="kpi-item"><strong>{summary.totalCases || 0}</strong><small>Test Cases</small></div>
-          <div className="kpi-item"><strong>{summary.uncoveredCases || 0}</strong><small>Uncovered Cases</small></div>
+          <div className="kpi-item"><strong>{totalRequirements}</strong><small>Requirements</small></div>
+          <div className="kpi-item"><strong>{coveredRequirements}</strong><small>Covered</small></div>
+          <div className="kpi-item"><strong>{totalCases}</strong><small>Test Cases</small></div>
+          <div className="kpi-item"><strong>{uncoveredCount}</strong><small>Uncovered Cases</small></div>
           <div className="kpi-item">
-            <strong>{summary.totalRequirements ? Math.round(((summary.coveredRequirements || 0) / summary.totalRequirements) * 100) : 0}%</strong>
+            <strong>{coveragePercent}%</strong>
             <small>Requirement Coverage</small>
           </div>
         </section>
@@ -2927,7 +3017,7 @@ export default function App() {
                   <td>{r.approved_count}</td>
                   <td>{r.passed_count}</td>
                   <td><strong>{r.coverage_percent}%</strong></td>
-                  <td>{(r.testCases || []).map((tc) => <span key={tc.id} className="chip">{tc.code}</span>)}</td>
+                  <td>{(Array.isArray(r.testCases) ? r.testCases : []).map((tc) => <span key={tc.id} className="chip">{tc.code}</span>)}</td>
                 </tr>
               ))}
               {!rows.length && <tr><td colSpan="9">No requirements found.</td></tr>}
@@ -2936,12 +3026,12 @@ export default function App() {
         </div>
 
         <div className="panel" style={{ marginTop: '16px' }}>
-          <div className="panel-header"><h4>Uncovered Test Cases ({(t.uncoveredCases || []).length})</h4></div>
+          <div className="panel-header"><h4>Uncovered Test Cases ({uncoveredCases.length})</h4></div>
           <div className="scroll-x">
             <table>
               <thead><tr><th>Code</th><th>Title</th><th>Module</th><th>Review</th></tr></thead>
               <tbody>
-                {(t.uncoveredCases || []).map((tc) => (
+                {uncoveredCases.map((tc) => (
                   <tr key={tc.id}>
                     <td><strong>{tc.code}</strong></td>
                     <td>{tc.title}</td>
@@ -2949,7 +3039,7 @@ export default function App() {
                     <td><span className="chip">{tc.review_status || 'Draft'}</span></td>
                   </tr>
                 ))}
-                {!(t.uncoveredCases || []).length && <tr><td colSpan="4">Every test case is linked to a requirement.</td></tr>}
+                {!uncoveredCases.length && <tr><td colSpan="4">Every test case is linked to a requirement.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2987,8 +3077,369 @@ export default function App() {
     </div>
   );
 
+  const renderProjects = () => {
+    const updateProjectDraft = (field, value) => {
+      setEditing((current) => current ? { ...current, draft: { ...current.draft, [field]: value } } : current);
+    };
+
+    return (
+      <div className="panel full-height-panel">
+        <div className="panel-header with-actions">
+          <div>
+            <h3>Project Portfolio ({data.projects.length})</h3>
+            <small>Manage project ownership, delivery dates, progress, and budget.</small>
+          </div>
+          <div className="inline-actions">
+            {canManageProjects && (
+              <button className="primary-button small" onClick={() => setShowProjectForm((visible) => !visible)}>
+                {showProjectForm ? 'Hide Form' : 'New Project'}
+              </button>
+            )}
+            <button className="secondary-button small" onClick={() => exportCsv(data.projects, 'projects.csv')}>Export CSV</button>
+          </div>
+        </div>
+
+        {showProjectForm && canManageProjects && (
+          <section className="project-form-section">
+            <div className="form-grid three-columns">
+              <label>Project Name
+                <input value={projectForm.name} placeholder="e.g. Digital Onboarding" onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} />
+              </label>
+              <label>Project Key
+                <input value={projectForm.keyCode} placeholder="e.g. ONB" maxLength={50} onChange={(event) => setProjectForm({ ...projectForm, keyCode: event.target.value.toUpperCase() })} />
+              </label>
+              <label>Owner
+                <select value={projectForm.ownerId} onChange={(event) => setProjectForm({ ...projectForm, ownerId: event.target.value })}>
+                  <option value="">Current user</option>
+                  {(data.users || []).map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                </select>
+              </label>
+              <label>Status
+                <select value={projectForm.status} onChange={(event) => setProjectForm({ ...projectForm, status: event.target.value })}>
+                  {['Active', 'On Hold', 'Completed', 'Archived'].map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </label>
+              <label>Priority
+                <select value={projectForm.priority} onChange={(event) => setProjectForm({ ...projectForm, priority: event.target.value })}>
+                  {testCasePriorities.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+                </select>
+              </label>
+              <label>Progress (%)
+                <input type="number" min="0" max="100" value={projectForm.progress} onChange={(event) => setProjectForm({ ...projectForm, progress: event.target.value })} />
+              </label>
+              <label>Start Date
+                <input type="date" value={projectForm.startDate} onChange={(event) => setProjectForm({ ...projectForm, startDate: event.target.value })} />
+              </label>
+              <label>End Date
+                <input type="date" value={projectForm.endDate} onChange={(event) => setProjectForm({ ...projectForm, endDate: event.target.value })} />
+              </label>
+              <label>Budget (hours)
+                <input type="number" min="0" value={projectForm.budgetHours} onChange={(event) => setProjectForm({ ...projectForm, budgetHours: event.target.value })} />
+              </label>
+              <label className="full-width">Description
+                <textarea rows="2" value={projectForm.description} placeholder="Project scope and goals" onChange={(event) => setProjectForm({ ...projectForm, description: event.target.value })} />
+              </label>
+            </div>
+            <div className="button-row">
+              <button className="primary-button" onClick={createProject}>Create Project</button>
+            </div>
+          </section>
+        )}
+
+        <div className="scroll-x">
+          <table className="project-table">
+            <thead>
+              <tr><th>Project</th><th>Key</th><th>Owner</th><th>Status</th><th>Priority</th><th>Progress</th><th>Schedule</th><th>Test Cases</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              {(data.projects || []).map((project) => {
+                const isEditing = editing?.entity === 'projects' && editing.id === project.id;
+                const draft = isEditing ? editing.draft : {};
+                return (
+                  <tr key={project.id}>
+                    <td>{isEditing ? <input className="project-inline-input" value={draft.name || ''} onChange={(event) => updateProjectDraft('name', event.target.value)} /> : <strong>{project.name}</strong>}</td>
+                    <td>{isEditing ? <input className="project-inline-input project-key-input" value={draft.keyCode || ''} onChange={(event) => updateProjectDraft('keyCode', event.target.value.toUpperCase())} /> : <span className="chip gray">{project.key_code}</span>}</td>
+                    <td>{isEditing ? (
+                      <select value={draft.ownerId || ''} onChange={(event) => updateProjectDraft('ownerId', event.target.value)}>
+                        <option value="">Unassigned</option>
+                        {(data.users || []).map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                      </select>
+                    ) : project.owner_name || '-'}</td>
+                    <td>{isEditing ? (
+                      <select value={draft.status || 'Active'} onChange={(event) => updateProjectDraft('status', event.target.value)}>
+                        {['Active', 'On Hold', 'Completed', 'Archived'].map((status) => <option key={status} value={status}>{status}</option>)}
+                      </select>
+                    ) : <span className="status-badge">{project.status}</span>}</td>
+                    <td>{isEditing ? (
+                      <select value={draft.priority || 'Medium'} onChange={(event) => updateProjectDraft('priority', event.target.value)}>
+                        {testCasePriorities.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+                      </select>
+                    ) : project.priority || 'Medium'}</td>
+                    <td>{isEditing ? <input className="project-inline-input" type="number" min="0" max="100" value={draft.progress ?? 0} onChange={(event) => updateProjectDraft('progress', event.target.value)} /> : `${Number(project.progress) || 0}%`}</td>
+                    <td>{isEditing ? (
+                      <div className="project-date-edit">
+                        <input type="date" value={dateFieldValue(draft.startDate)} aria-label="Project start date" onChange={(event) => updateProjectDraft('startDate', event.target.value)} />
+                        <input type="date" value={dateFieldValue(draft.endDate)} aria-label="Project end date" onChange={(event) => updateProjectDraft('endDate', event.target.value)} />
+                      </div>
+                    ) : `${dateFieldValue(project.start_date) || '-'} to ${dateFieldValue(project.end_date) || '-'}`}</td>
+                    <td>{project.test_cases_count || 0}</td>
+                    <td className="row-actions">
+                      {canManageProjects && (isEditing ? (
+                        <><button className="primary-button small" onClick={saveEdit}>Save</button><button className="ghost-button small" onClick={cancelEdit}>Cancel</button></>
+                      ) : (
+                        <><button className="secondary-button small" onClick={() => startEdit('projects', { ...project, keyCode: project.key_code, ownerId: project.owner_id || '', startDate: dateFieldValue(project.start_date), endDate: dateFieldValue(project.end_date), budgetHours: project.budget_hours || 0 })}>Edit</button>
+                          <button className="ghost-button small danger" onClick={() => deleteEntity('projects', project.id, `project "${project.name}"`)}>Delete</button></>
+                      ))}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!(data.projects || []).length && <tr><td colSpan="9">No projects found.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderGantt = () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const parseDate = (value) => {
+      if (!value) return null;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const rows = [
+      ...(ganttData.projects || []).map((item) => ({
+        id: `project-${item.id}`, entityId: item.id, entity: 'projects', type: 'project', item,
+        name: item.name, detail: item.key_code, start: item.start_date, end: item.end_date, progress: item.progress,
+      })),
+      ...(ganttData.milestones || []).map((item) => ({
+        id: `milestone-${item.id}`, entityId: item.id, entity: 'milestones', type: 'milestone', item,
+        name: item.name, detail: item.project_name, start: item.start_date, end: item.due_date, progress: item.progress,
+      })),
+      ...(ganttData.cycles || []).map((item) => ({
+        id: `cycle-${item.id}`, entityId: item.id, entity: 'test-cycles', type: 'cycle', item,
+        name: item.name, detail: `${item.project_name} · ${item.status}`, start: item.planned_start, end: item.planned_end, progress: item.progress,
+      })),
+      ...(ganttData.runs || []).map((item) => ({
+        id: `run-${item.id}`, entityId: item.id, entity: 'test-runs', type: 'run', item,
+        name: item.name, detail: `${item.project_name} · ${item.status}`, start: item.planned_start, end: item.actual_end, progress: item.total_cases ? Math.round((Number(item.passed_cases || 0) / item.total_cases) * 100) : 0,
+      })),
+    ].map((row) => {
+      const start = parseDate(row.start) || today;
+      const end = parseDate(row.end) || new Date(start.getTime() + 7 * dayMs);
+      return { ...row, start, end: end < start ? new Date(start.getTime() + dayMs) : end };
+    });
+
+    const scaleSettings = {
+      day: { spanDays: 14, tickCount: 14 },
+      week: { spanDays: 84, tickCount: 12 },
+      month: { spanDays: 365, tickCount: 12 },
+    };
+    const selectedScale = scaleSettings[ganttScale] || scaleSettings.week;
+    const earliest = rows.length ? Math.min(...rows.map((row) => row.start.getTime())) : today.getTime();
+    const latest = rows.length ? Math.max(...rows.map((row) => row.end.getTime())) : today.getTime();
+    const center = rows.length ? (earliest + latest) / 2 : today.getTime();
+    const rangeDuration = selectedScale.spanDays * dayMs;
+    const rangeStart = center - rangeDuration / 2;
+    const rangeEnd = rangeStart + rangeDuration;
+    const tickCount = selectedScale.tickCount;
+    const ticks = Array.from({ length: tickCount }, (_, index) => new Date(rangeStart + (rangeDuration * index) / tickCount));
+    const position = (date) => ((date.getTime() - rangeStart) / rangeDuration) * 100;
+    const tickLabelOptions = ganttScale === 'day'
+      ? { weekday: 'short', day: 'numeric' }
+      : ganttScale === 'month'
+        ? { month: 'short', year: '2-digit' }
+        : { month: 'short', day: 'numeric' };
+    const progressValue = (value) => Math.max(0, Math.min(100, Number(value) || 0));
+    const canEditMilestone = canManageTimeline;
+    const editingMilestone = editing?.entity === 'milestones' ? editing : null;
+    const updateMilestoneDraft = (field, value) => {
+      setEditing((current) => current?.entity === 'milestones'
+        ? { ...current, draft: { ...current.draft, [field]: value } }
+        : current);
+    };
+
+    return (
+      <div className="gantt-container">
+        <div className="gantt-toolbar">
+          <div>
+            <h3>Gantt Chart</h3>
+            <small>Project delivery timeline</small>
+          </div>
+          <div className="gantt-controls-group">
+            <div className="gantt-scale-buttons" role="group" aria-label="Gantt time scale">
+              {['day', 'week', 'month'].map((scale) => (
+                <button
+                  key={scale}
+                  type="button"
+                  className={`gantt-scale-btn ${ganttScale === scale ? 'active' : ''}`}
+                  aria-pressed={ganttScale === scale}
+                  onClick={() => setGanttScale(scale)}
+                >
+                  {scale[0].toUpperCase() + scale.slice(1)}
+                </button>
+              ))}
+            </div>
+            <select aria-label="Filter Gantt chart by project" value={ganttProjectFilter} onChange={(event) => setGanttProjectFilter(event.target.value)}>
+              <option value="">All Projects</option>
+              {(data.projects || []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            <button type="button" className="secondary-button small" onClick={() => loadGantt(ganttProjectFilter)}>Refresh</button>
+            {canManageTimeline && (
+              <button type="button" className="primary-button small" onClick={() => {
+                setGanttMilestoneDraft({ projectId: ganttProjectFilter, name: '', description: '', status: 'Open', startDate: '', dueDate: '', progress: 0 });
+                setShowGanttMilestoneForm((visible) => !visible);
+                setEditing(null);
+              }}>
+                {showGanttMilestoneForm ? 'Hide Milestone Form' : 'New Milestone'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <section className="gantt-summary-ribbon">
+          <div className="gantt-ribbon-item"><span className="ribbon-lbl">Projects</span><strong className="ribbon-val">{ganttData.projects.length}</strong></div>
+          <div className="gantt-ribbon-item"><span className="ribbon-lbl">Milestones</span><strong className="ribbon-val">{ganttData.milestones.length}</strong></div>
+          <div className="gantt-ribbon-item"><span className="ribbon-lbl">Test Cycles</span><strong className="ribbon-val">{ganttData.cycles.length}</strong></div>
+          <div className="gantt-ribbon-item"><span className="ribbon-lbl">Test Runs</span><strong className="ribbon-val">{ganttData.runs.length}</strong></div>
+        </section>
+
+        {showGanttMilestoneForm && canManageTimeline && (
+          <section className="gantt-edit-form">
+            <div className="form-grid three-columns">
+              <label>Project
+                <select value={ganttMilestoneDraft.projectId} onChange={(event) => setGanttMilestoneDraft({ ...ganttMilestoneDraft, projectId: event.target.value })}>
+                  <option value="">Select project</option>
+                  {(data.projects || []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                </select>
+              </label>
+              <label>Milestone Name
+                <input value={ganttMilestoneDraft.name} placeholder="e.g. SIT exit" onChange={(event) => setGanttMilestoneDraft({ ...ganttMilestoneDraft, name: event.target.value })} />
+              </label>
+              <label>Status
+                <select value={ganttMilestoneDraft.status} onChange={(event) => setGanttMilestoneDraft({ ...ganttMilestoneDraft, status: event.target.value })}>
+                  {['Open', 'In Progress', 'Completed', 'Blocked'].map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </label>
+              <label>Start Date
+                <input type="date" value={ganttMilestoneDraft.startDate} onChange={(event) => setGanttMilestoneDraft({ ...ganttMilestoneDraft, startDate: event.target.value })} />
+              </label>
+              <label>Due Date
+                <input type="date" value={ganttMilestoneDraft.dueDate} onChange={(event) => setGanttMilestoneDraft({ ...ganttMilestoneDraft, dueDate: event.target.value })} />
+              </label>
+              <label>Progress (%)
+                <input type="number" min="0" max="100" value={ganttMilestoneDraft.progress} onChange={(event) => setGanttMilestoneDraft({ ...ganttMilestoneDraft, progress: event.target.value })} />
+              </label>
+              <label className="full-width">Description
+                <textarea rows="2" value={ganttMilestoneDraft.description} onChange={(event) => setGanttMilestoneDraft({ ...ganttMilestoneDraft, description: event.target.value })} />
+              </label>
+            </div>
+            <div className="button-row">
+              <button className="primary-button" onClick={createGanttMilestone}>Create Milestone</button>
+            </div>
+          </section>
+        )}
+
+        {editingMilestone && canEditMilestone && (
+          <section className="gantt-edit-form">
+            <div className="form-grid three-columns">
+              <label>Milestone Name
+                <input value={editingMilestone.draft.name || ''} onChange={(event) => updateMilestoneDraft('name', event.target.value)} />
+              </label>
+              <label>Status
+                <select value={editingMilestone.draft.status || 'Open'} onChange={(event) => updateMilestoneDraft('status', event.target.value)}>
+                  {['Open', 'In Progress', 'Completed', 'Blocked'].map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </label>
+              <label>Progress (%)
+                <input type="number" min="0" max="100" value={editingMilestone.draft.progress || 0} onChange={(event) => updateMilestoneDraft('progress', event.target.value)} />
+              </label>
+              <label>Start Date
+                <input type="date" value={dateFieldValue(editingMilestone.draft.startDate)} onChange={(event) => updateMilestoneDraft('startDate', event.target.value)} />
+              </label>
+              <label>Due Date
+                <input type="date" value={dateFieldValue(editingMilestone.draft.dueDate)} onChange={(event) => updateMilestoneDraft('dueDate', event.target.value)} />
+              </label>
+              <label>Description
+                <input value={editingMilestone.draft.description || ''} onChange={(event) => updateMilestoneDraft('description', event.target.value)} />
+              </label>
+            </div>
+            <div className="button-row">
+              <button className="primary-button small" onClick={saveEdit}>Save Milestone</button>
+              <button className="secondary-button small" onClick={cancelEdit}>Cancel</button>
+            </div>
+          </section>
+        )}
+
+        <div className="gantt-split">
+          <div className="gantt-tree-col">
+            <div className="gantt-tree-header">Work Item</div>
+            {rows.map((row) => (
+              <div className="gantt-tree-row" key={row.id}>
+                <div className="gantt-tree-item-title" title={row.name}>
+                  <span className={`gantt-item-icon ${row.type}`}>{row.type.slice(0, 1).toUpperCase()}</span>
+                  <span>{row.name}</span>
+                </div>
+                <div className="gantt-tree-row-meta">
+                  <span>{progressValue(row.progress)}%</span>
+                  {row.type === 'milestone' && canManageTimeline && (
+                    <>
+                      <button type="button" className="ghost-button small" aria-label={`Edit ${row.name}`} onClick={() => {
+                        setShowGanttMilestoneForm(false);
+                        startEdit('milestones', { ...row.item, projectId: row.item.project_id, startDate: dateFieldValue(row.item.start_date), dueDate: dateFieldValue(row.item.due_date) });
+                      }}>Edit</button>
+                      <button type="button" className="ghost-button small danger" aria-label={`Delete ${row.name}`} onClick={() => deleteEntity('milestones', row.entityId, `milestone "${row.name}"`)}>Delete</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+            {!rows.length && <div className="gantt-tree-row">No timeline items.</div>}
+          </div>
+
+          <div className="gantt-chart-col">
+            <div className="gantt-timeline-header">
+              {ticks.map((tick, index) => <div className="gantt-timeline-cell" key={`${tick.toISOString()}-${index}`} style={{ flex: 1 }}>{tick.toLocaleDateString(undefined, tickLabelOptions)}</div>)}
+            </div>
+            <div className="gantt-chart-body">
+              {ticks.map((tick, index) => <div className="gantt-grid-col" key={`grid-${index}`} style={{ left: `${(index / tickCount) * 100}%` }} />)}
+              {today.getTime() >= rangeStart && today.getTime() <= rangeEnd && <div className="gantt-today-marker" style={{ left: `${position(today)}%` }} />}
+              {rows.map((row) => {
+                const left = Math.max(0, position(row.start));
+                const right = Math.min(100, position(row.end));
+                const width = Math.max(1.5, right - left);
+                const barClass = row.type === 'milestone' ? 'milestone-bar' : row.type;
+                return (
+                  <div className="gantt-chart-row" key={row.id}>
+                    {row.end.getTime() >= rangeStart && row.start.getTime() <= rangeEnd && (
+                      <div className={`gantt-bar ${barClass}`} style={{ left: `${left}%`, width: `${width}%` }} title={`${row.name}: ${dateFieldValue(row.start)} to ${dateFieldValue(row.end)}`}>
+                        <div className="gantt-bar-fill" style={{ width: `${progressValue(row.progress)}%` }} />
+                        <span className="gantt-bar-label">{row.name}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="gantt-legend">
+          {['project', 'milestone', 'cycle', 'run'].map((type) => <div className="gantt-legend-item" key={type}><span className={`gantt-legend-color ${type}`} />{type === 'cycle' ? 'Test Cycle' : type === 'run' ? 'Test Run' : type[0].toUpperCase() + type.slice(1)}</div>)}
+          <div className="gantt-legend-item"><span className="gantt-legend-color today" />Today</div>
+        </div>
+      </div>
+    );
+  };
+
   const renderActiveTab = () => {
     switch (activeTab) {
+      case 'projects': return renderProjects();
+      case 'gantt': return renderGantt();
       case 'requirements': return renderRequirements();
       case 'test-cases': return renderTestCases();
       case 'test-suites': return renderSuites();
