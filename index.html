@@ -10,24 +10,35 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --primary-blue: #0056b3;
-            --success-green: #28a745;
-            --danger-red: #dc3545;
-            --warning-orange: #ffc107;
-            --info-cyan: #17a2b8;
-            --secondary-gray: #6c757d;
-            --purple: #6f42c1;
-            --light-bg: #f8f9fa;
-            --dark-bg: #343a40;
-            --card-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            --hover-shadow: 0 6px 16px rgba(0,0,0,0.15);
+            --ina-navy: #0B1A33;
+            --ina-navy-2: #14294A;
+            --ina-navy-3: #1E3A66;
+            --ina-red: #E30613;
+            --ina-red-dark: #B8040F;
+            --ina-gold: #C5A86A;
+            --ina-green: #198754;
+            --slate-50: #F8FAFC;
+            --slate-100: #F1F5F9;
+            --slate-200: #E2E8F0;
+            --slate-500: #64748B;
+            --primary-blue: var(--ina-navy);
+            --success-green: var(--ina-green);
+            --danger-red: var(--ina-red);
+            --warning-orange: var(--ina-gold);
+            --info-cyan: var(--ina-navy);
+            --secondary-gray: var(--slate-500);
+            --purple: var(--ina-gold);
+            --light-bg: var(--slate-50);
+            --dark-bg: var(--ina-navy);
+            --card-shadow: 0 4px 24px rgba(11,26,51,0.06);
+            --hover-shadow: 0 8px 28px rgba(11,26,51,0.1);
         }
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            color: #333;
+            background: var(--slate-50);
+            color: var(--ina-navy);
         }
         
         .container {
@@ -37,21 +48,32 @@
         }
         
         .dashboard-header {
+            position: relative;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            background: white;
+            background: linear-gradient(110deg, var(--ina-navy) 0%, var(--ina-navy-2) 58%, var(--ina-navy-3) 100%);
             padding: 20px 30px;
-            border-radius: 12px;
+            border-radius: 8px;
             box-shadow: var(--card-shadow);
             margin-bottom: 25px;
             flex-wrap: wrap;
             gap: 15px;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        .dashboard-header::after {
+            content: '';
+            position: absolute;
+            inset: auto 0 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--ina-red) 0 62%, var(--ina-gold) 100%);
         }
         
         .header-left h1 {
             margin: 0;
-            color: var(--primary-blue);
+            color: #fff;
             font-size: 28px;
             display: flex;
             align-items: center;
@@ -59,7 +81,13 @@
         }
         
         .header-left h1 i {
-            color: var(--info-cyan);
+            display: inline-grid;
+            place-items: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            background: var(--ina-red);
+            color: #fff;
         }
         
         .header-left .subtitle {
@@ -87,6 +115,36 @@
             border: 1px solid #ced4da;
             border-radius: 6px;
             font-size: 14px;
+        }
+
+        .dashboard-nav {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            display: flex;
+            gap: 4px;
+            margin: -10px 0 24px;
+            padding: 0 12px;
+            overflow-x: auto;
+            background: rgba(255,255,255,0.96);
+            border-bottom: 1px solid var(--slate-200);
+            box-shadow: 0 2px 8px rgba(11,26,51,0.04);
+        }
+
+        .dashboard-nav a {
+            flex: 0 0 auto;
+            padding: 13px 15px 11px;
+            border-bottom: 3px solid transparent;
+            color: var(--slate-500);
+            font-size: 13px;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .dashboard-nav a:hover { color: var(--ina-navy); }
+        .dashboard-nav a.active {
+            border-bottom-color: var(--ina-red);
+            color: var(--ina-red);
         }
         
         .metrics-summary {
@@ -300,10 +358,15 @@
         }
         
         .filters {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(140px, 1fr)) auto;
+            align-items: start;
             gap: 10px;
-            flex-wrap: wrap;
         }
+
+        .filters .search-box { min-width: 0; margin-bottom: 0; }
+        .filters .search-box input { width: 100%; }
+        .filters select { width: 100%; min-width: 0; }
         
         select, input[type="text"] {
             padding: 8px 12px;
@@ -635,6 +698,155 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
+
+        /* INA design system */
+        .dashboard-header { box-shadow: var(--card-shadow); }
+        .dashboard-header > * { position: relative; z-index: 1; }
+        .header-left .subtitle { color: rgba(255,255,255,0.76); }
+        .date-picker { background: rgba(255,255,255,0.1); }
+        .date-picker label { color: #fff; }
+        .date-picker input { border-color: rgba(255,255,255,0.35); color: var(--ina-navy); }
+
+        .metric-card,
+        .chart-container,
+        .qa-performance,
+        .severity-breakdown,
+        .data-table-section,
+        .upload-card {
+            background: #fff;
+            border: 1px solid var(--slate-200);
+            border-radius: 8px;
+            box-shadow: var(--card-shadow);
+        }
+
+        .metric-card { border-left-width: 4px; }
+        .metric-card.failed { border-left-color: var(--ina-red); }
+        .metric-card.passed { border-left-color: var(--ina-green); }
+        .metric-card.retest,
+        .metric-card.onhold,
+        .metric-card.priority { border-left-color: var(--ina-gold); }
+        .metric-card.tbc,
+        .metric-card.na { border-left-color: var(--ina-navy); }
+
+        .chart-container h2,
+        .upload-card h3,
+        .detail-section h4 { color: var(--ina-navy); }
+        .chart-container h2 i { color: var(--ina-red); }
+        .qa-avatar { background: var(--ina-navy); }
+        .severity-critical .severity-fill,
+        .severity-major .severity-fill { background: var(--ina-red); }
+        .severity-medium .severity-fill { background: var(--ina-gold); }
+        .severity-minor .severity-fill { background: var(--ina-navy); }
+
+        .table-header h2 { color: var(--ina-navy) !important; }
+        table { border-collapse: separate; border-spacing: 0; }
+        th {
+            background: var(--slate-100);
+            color: var(--ina-navy);
+            border-bottom: 1px solid var(--slate-200);
+        }
+        td { border-bottom-color: var(--slate-200); }
+        tbody tr:hover { background: #FFF1F2; }
+
+        .status-passed { background: #E7F5EC; color: #176B43; }
+        .status-failed { background: #FDE8E9; color: var(--ina-red); }
+        .status-retest,
+        .status-onhold { background: #F7F1E3; color: #80621E; }
+        .status-tbc { background: #E8EEF6; color: var(--ina-navy); }
+        .status-na { background: var(--slate-100); color: var(--slate-500); }
+        .severity-badge.severity-critical,
+        .severity-badge.severity-major { background: var(--ina-red); color: #fff; }
+        .severity-badge.severity-medium { background: var(--ina-gold); color: var(--ina-navy); }
+        .severity-badge.severity-minor { background: var(--ina-navy); color: #fff; }
+        .severity-breakdown .severity-item.severity-critical,
+        .severity-breakdown .severity-item.severity-major,
+        .severity-breakdown .severity-item.severity-medium,
+        .severity-breakdown .severity-item.severity-minor {
+            background: transparent;
+            color: var(--ina-navy);
+        }
+
+        .btn-primary,
+        .upload-card > .btn-success {
+            background: linear-gradient(135deg, var(--ina-red), var(--ina-red-dark));
+            color: #fff;
+            box-shadow: 0 3px 10px rgba(227,6,19,0.16);
+        }
+        .btn-primary:hover,
+        .upload-card > .btn-success:hover { background: var(--ina-red-dark); }
+        .btn-navy { background: var(--ina-navy); color: #fff; }
+        .btn-navy:hover { background: var(--ina-navy-2); }
+        .btn.gold { background: var(--ina-gold); color: var(--ina-navy); }
+        .btn-outline { background: #fff; border-color: var(--slate-200); color: var(--ina-navy); }
+        .btn-outline:hover { background: var(--slate-100); border-color: var(--ina-navy); }
+        .page-btn.active { background: var(--ina-red); border-color: var(--ina-red); }
+        .jira-link { color: var(--ina-navy); }
+        .jira-link:hover { color: var(--ina-red); }
+        .segment-affluent,
+        .priority-gold { color: #8A6A22; background: #F7F1E3; }
+
+        @media (max-width: 768px) {
+            .dashboard-header { padding: 18px; }
+            .date-picker { width: 100%; flex-wrap: wrap; }
+            .date-picker input { flex: 1 1 130px; min-width: 0; }
+            .dashboard-nav { margin-top: -6px; }
+        }
+
+        @media print {
+            body { background: #fff; }
+            .dashboard-nav,
+            .date-picker,
+            .filters,
+            .upload-section,
+            .export-actions,
+            .action-buttons,
+            .pagination,
+            .btn { display: none !important; }
+            .dashboard-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .metric-card,
+            .chart-container,
+            .qa-performance,
+            .severity-breakdown,
+            .data-table-section { break-inside: avoid; box-shadow: none; }
+            th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+
+        .tour-backdrop[hidden] { display: none; }
+        .tour-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: rgba(11,26,51,0.62);
+        }
+        .tour-highlight {
+            position: relative !important;
+            z-index: 2001 !important;
+            outline: 3px solid var(--ina-red) !important;
+            outline-offset: 4px;
+            box-shadow: 0 0 0 8px rgba(227,6,19,0.18) !important;
+        }
+        .tour-card {
+            position: fixed;
+            z-index: 2002;
+            width: min(390px, calc(100vw - 32px));
+            padding: 20px;
+            border: 1px solid var(--slate-200);
+            border-radius: 8px;
+            background: #fff;
+            color: var(--ina-navy);
+            box-shadow: 0 16px 48px rgba(11,26,51,0.22);
+        }
+        .tour-card h2 { margin: 0 0 8px; font-size: 18px; }
+        .tour-card p { margin: 0 0 16px; color: var(--slate-500); font-size: 14px; line-height: 1.55; }
+        .tour-progress-track { height: 4px; margin-bottom: 12px; overflow: hidden; border-radius: 4px; background: var(--slate-100); }
+        .tour-progress-fill { height: 100%; background: var(--ina-red); transition: width 0.2s ease; }
+        .tour-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .tour-step-count { color: var(--slate-500); font-size: 12px; font-weight: 700; }
+        .tour-actions { display: flex; gap: 8px; }
+        .tour-actions .btn { min-height: 36px; }
+        @media (max-width: 600px) {
+            .tour-card { right: 16px !important; bottom: 16px !important; left: 16px !important; top: auto !important; width: auto; }
+        }
     </style>
 </head>
 <body>
@@ -648,14 +860,23 @@
         </div>
         <div class="date-picker">
             <label for="startDate"><i class="fas fa-calendar-alt"></i> Start:</label>
-            <input type="date" id="startDate" value="2025-01-01">
+            <input type="date" id="startDate">
             <label for="endDate"><i class="fas fa-calendar-alt"></i> End:</label>
-            <input type="date" id="endDate" value="2025-12-31">
+            <input type="date" id="endDate">
             <button class="btn btn-outline" onclick="applyDateFilter()">
                 <i class="fas fa-filter"></i> Filter
             </button>
+            <button type="button" class="btn btn-navy" id="startTourButton" aria-controls="websiteTour" aria-haspopup="dialog">
+                <i class="fas fa-compass"></i> Take a Tour
+            </button>
         </div>
     </div>
+
+    <nav class="dashboard-nav" aria-label="Dashboard sections">
+        <a href="#overview" class="active">Overview</a>
+        <a href="#test-cases">Test Cases</a>
+        <a href="#data-entry">Add Cases</a>
+    </nav>
 
     <!-- Metrics Summary -->
     <div class="metrics-summary" id="metricsSummary">
@@ -663,7 +884,7 @@
     </div>
 
     <!-- Main Dashboard Content -->
-    <div class="dashboard-content">
+    <div class="dashboard-content" id="overview">
         <!-- Charts Section -->
         <div class="main-charts">
             <div class="chart-container">
@@ -700,7 +921,7 @@
     </div>
 
     <!-- Data Table Section -->
-    <div class="data-table-section">
+    <div class="data-table-section" id="test-cases">
         <div class="table-header">
             <h2 style="margin: 0; color: var(--primary-blue);">
                 <i class="fas fa-table"></i> Test Scenarios (Total: <span id="totalScenariosCount">0</span>)
@@ -771,7 +992,7 @@
     </div>
 
     <!-- Upload Section -->
-    <div class="upload-section">
+    <div class="upload-section" id="data-entry">
         <!-- Manual Upload Section -->
         <div class="upload-card">
             <h3><i class="fas fa-plus-circle"></i> Add Single Test Case</h3>
@@ -879,7 +1100,60 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
     </div>
 </div>
 
+<div class="tour-backdrop" id="websiteTourBackdrop" hidden></div>
+<section class="tour-card" id="websiteTour" role="dialog" aria-modal="true" aria-labelledby="tourTitle" aria-describedby="tourDescription" tabindex="-1" hidden>
+        <div class="tour-progress-track" aria-hidden="true"><div class="tour-progress-fill" id="tourProgressFill"></div></div>
+        <span class="tour-step-count" id="tourStepCount"></span>
+        <h2 id="tourTitle"></h2>
+        <p id="tourDescription"></p>
+        <div class="tour-card-footer">
+            <button type="button" class="btn btn-outline" id="tourSkipButton">Skip tour</button>
+            <div class="tour-actions">
+                <button type="button" class="btn btn-outline" id="tourBackButton">Back</button>
+                <button type="button" class="btn btn-primary" id="tourNextButton">Next</button>
+            </div>
+        </div>
+</section>
+
 <script>
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[character]);
+    }
+
+    function parseCSVRows(input) {
+        const rows = [];
+        let fields = [];
+        let field = '';
+        let quoted = false;
+        for (let index = 0; index < input.length; index++) {
+            const character = input[index];
+            if (character === '"') {
+                if (quoted && input[index + 1] === '"') {
+                    field += '"';
+                    index++;
+                } else {
+                    quoted = !quoted;
+                }
+            } else if (character === ',' && !quoted) {
+                fields.push(field);
+                field = '';
+            } else if ((character === '\n' || character === '\r') && !quoted) {
+                if (character === '\r' && input[index + 1] === '\n') index++;
+                fields.push(field);
+                if (fields.some(value => value.trim() !== '')) rows.push(fields);
+                fields = [];
+                field = '';
+            } else {
+                field += character;
+            }
+        }
+        fields.push(field);
+        if (fields.some(value => value.trim() !== '')) rows.push(fields);
+        return rows;
+    }
+
     // Enhanced Test Scenarios with Indonesian format support
     let testScenarios = [
         { 
@@ -1007,6 +1281,74 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
     const statuses = ['Passed', 'Failed', 'N/A', 'Retest', 'On Hold', 'TBC'];
     const severities = ['Critical', 'Major', 'Medium', 'Minor'];
     const qaEngineers = ['badruni', 'jane.smith', 'mike.johnson', 'sarah.williams', 'robert.brown'];
+
+    const websiteTourSteps = [
+        { selector: '.dashboard-header', title: 'Dashboard controls', description: 'Set a reporting date range and open this guided tour from the branded header.' },
+        { selector: '.dashboard-nav', title: 'Section navigation', description: 'Jump between the overview, test-case table, and data-entry forms.' },
+        { selector: '#metricsSummary', title: 'Quality summary', description: 'Review pass, fail, retest, hold, and overall pass-rate metrics.' },
+        { selector: '.main-charts', title: 'Charts and analysis', description: 'Compare status distribution with severity and review QA performance.' },
+        { selector: '#test-cases', title: 'Test-case workspace', description: 'Search, filter, paginate, inspect, edit, delete, and export test scenarios.' },
+        { selector: '#data-entry', title: 'Add and import cases', description: 'Create a single scenario or import a CSV with the provided template.' },
+    ];
+    let activeTourIndex = 0;
+    let highlightedTourTarget = null;
+
+    function positionTourCard(target) {
+        const card = document.querySelector('.tour-card');
+        const targetRect = target.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        const belowTop = targetRect.bottom + 18;
+        const top = belowTop + cardRect.height <= window.innerHeight - 16
+            ? belowTop
+            : Math.max(16, targetRect.top - cardRect.height - 18);
+        const left = Math.max(16, Math.min(targetRect.left, window.innerWidth - cardRect.width - 16));
+        card.style.top = `${top}px`;
+        card.style.left = `${left}px`;
+        card.style.right = 'auto';
+        card.style.bottom = 'auto';
+    }
+
+    function renderTourStep() {
+        const step = websiteTourSteps[activeTourIndex];
+        if (!step) return endWebsiteTour();
+        highlightedTourTarget?.classList.remove('tour-highlight');
+        highlightedTourTarget = document.querySelector(step.selector);
+        if (!highlightedTourTarget) return endWebsiteTour();
+        highlightedTourTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        highlightedTourTarget.classList.add('tour-highlight');
+
+        document.getElementById('tourTitle').textContent = step.title;
+        document.getElementById('tourDescription').textContent = step.description;
+        document.getElementById('tourStepCount').textContent = `Step ${activeTourIndex + 1} of ${websiteTourSteps.length}`;
+        document.getElementById('tourProgressFill').style.width = `${((activeTourIndex + 1) / websiteTourSteps.length) * 100}%`;
+        document.getElementById('tourBackButton').disabled = activeTourIndex === 0;
+        document.getElementById('tourNextButton').textContent = activeTourIndex === websiteTourSteps.length - 1 ? 'Finish' : 'Next';
+        window.setTimeout(() => positionTourCard(highlightedTourTarget), 250);
+    }
+
+    function startWebsiteTour() {
+        activeTourIndex = 0;
+        document.getElementById('websiteTourBackdrop').hidden = false;
+        document.getElementById('websiteTour').hidden = false;
+        renderTourStep();
+        document.getElementById('websiteTour').focus();
+    }
+
+    function endWebsiteTour() {
+        document.getElementById('websiteTourBackdrop').hidden = true;
+        document.getElementById('websiteTour').hidden = true;
+        highlightedTourTarget?.classList.remove('tour-highlight');
+        highlightedTourTarget = null;
+        document.getElementById('startTourButton').focus();
+    }
+
+    function moveWebsiteTour(direction) {
+        const nextIndex = activeTourIndex + direction;
+        if (nextIndex < 0) return;
+        if (nextIndex >= websiteTourSteps.length) return endWebsiteTour();
+        activeTourIndex = nextIndex;
+        renderTourStep();
+    }
     
     let chartInstances = {
         status: null,
@@ -1025,6 +1367,22 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
         renderMetricsSummary();
         renderQAPerformance();
         renderSeverityBreakdown();
+        document.getElementById('tableBody').addEventListener('click', handleTableAction);
+        document.getElementById('startTourButton').addEventListener('click', startWebsiteTour);
+        document.getElementById('tourNextButton').addEventListener('click', () => moveWebsiteTour(1));
+        document.getElementById('tourBackButton').addEventListener('click', () => moveWebsiteTour(-1));
+        document.getElementById('tourSkipButton').addEventListener('click', endWebsiteTour);
+        document.addEventListener('keydown', function(event) {
+            if (document.getElementById('websiteTourBackdrop').hidden) return;
+            if (event.key === 'Escape') endWebsiteTour();
+            if (event.key === 'ArrowRight') moveWebsiteTour(1);
+            if (event.key === 'ArrowLeft') moveWebsiteTour(-1);
+        });
+        document.querySelector('.dashboard-nav')?.addEventListener('click', function(event) {
+            const link = event.target.closest('a[href^="#"]');
+            if (!link) return;
+            document.querySelectorAll('.dashboard-nav a').forEach(item => item.classList.toggle('active', item === link));
+        });
     });
 
     // Helper function to map severity for display
@@ -1062,7 +1420,8 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
         });
         
         // Calculate pass rate
-        const passRate = total > 0 ? ((passed / (passed + failed)) * 100).toFixed(1) : 0;
+        const completedCount = passed + failed;
+        const passRate = completedCount > 0 ? ((passed / completedCount) * 100).toFixed(1) : '0.0';
         
         // Calculate severity distribution
         const severityCounts = severities.reduce((acc, severity) => {
@@ -1205,15 +1564,45 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
     }
 
     function renderTable() {
-        filteredData = [...testScenarios];
+        filteredData = getFilteredScenarios();
+        const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+        currentPage = Math.max(1, Math.min(currentPage, totalPages || 1));
         renderTablePage();
         updatePagination();
         updateCharts();
     }
 
+    function getFilteredScenarios() {
+        const statusFilter = document.getElementById('filterStatus').value;
+        const severityFilter = document.getElementById('filterSeverity').value;
+        const qaFilter = document.getElementById('filterQA').value;
+        const searchText = document.getElementById('searchInput').value.trim().toLowerCase();
+        const startValue = document.getElementById('startDate').value;
+        const endValue = document.getElementById('endDate').value;
+        const startDate = startValue ? new Date(`${startValue}T00:00:00`).getTime() : null;
+        const endDate = endValue ? new Date(`${endValue}T23:59:59.999`).getTime() : null;
+
+        return testScenarios.filter(scenario => {
+            if (statusFilter && scenario.status !== statusFilter) return false;
+            if (severityFilter && scenario.severity !== severityFilter) return false;
+            if (qaFilter && scenario.qa !== qaFilter) return false;
+            const updatedAt = scenario.lastUpdated ? new Date(`${scenario.lastUpdated}T12:00:00`).getTime() : null;
+            if (startDate && (!updatedAt || updatedAt < startDate)) return false;
+            if (endDate && (!updatedAt || updatedAt > endDate)) return false;
+            if (searchText) {
+                const searchable = [scenario.id, scenario.description, scenario.qa, scenario.jira,
+                    scenario.metadata?.userStory, scenario.metadata?.moduleFitur]
+                    .map(value => String(value || '').toLowerCase()).join(' ');
+                if (!searchable.includes(searchText)) return false;
+            }
+            return true;
+        });
+    }
+
     function renderTablePage() {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = '';
+        document.getElementById('totalScenariosCount').textContent = filteredData.length;
         
         const startIndex = (currentPage - 1) * itemsPerPage;
         const endIndex = startIndex + itemsPerPage;
@@ -1233,37 +1622,39 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
         
         pageData.forEach(scenario => {
             const tr = document.createElement('tr');
+            const severityClass = String(scenario.severity || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const statusClass = String(scenario.status || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const jiraUrl = `https://jira.example.com/browse/${encodeURIComponent(String(scenario.jira || ''))}`;
             tr.innerHTML = `
-                <td><strong>${scenario.id}</strong></td>
-                <td>${scenario.metadata?.userStory || 'N/A'}</td>
-                <td>${scenario.metadata?.moduleFitur || 'N/A'}</td>
-                <td>${scenario.description}</td>
+                <td><strong>${escapeHtml(scenario.id)}</strong></td>
+                <td>${escapeHtml(scenario.metadata?.userStory || 'N/A')}</td>
+                <td>${escapeHtml(scenario.metadata?.moduleFitur || 'N/A')}</td>
+                <td>${escapeHtml(scenario.description)}</td>
                 <td>
-                    <span class="severity-badge severity-${scenario.severity.toLowerCase()}">
-                        ${scenario.severity}
+                    <span class="severity-badge severity-${severityClass}">
+                        ${escapeHtml(scenario.severity)}
                     </span>
                 </td>
                 <td>
-                    <span class="status-badge status-${scenario.status.toLowerCase().replace(/\s/g, '')}">
-                        ${scenario.status}
+                    <span class="status-badge status-${statusClass}">
+                        ${escapeHtml(scenario.status)}
                     </span>
                 </td>
-                <td>${scenario.qa}</td>
+                <td>${escapeHtml(scenario.qa)}</td>
                 <td>
-                    <a href="https://jira.example.com/browse/${scenario.jira}" 
-                       target="_blank" class="jira-link">
-                        <i class="fab fa-jira"></i> ${scenario.jira}
+                    <a href="${escapeHtml(jiraUrl)}" target="_blank" rel="noopener noreferrer" class="jira-link">
+                        <i class="fab fa-jira"></i> ${escapeHtml(scenario.jira)}
                     </a>
                 </td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn btn-outline" onclick="showDetail('${scenario.id}')" title="View Details">
+                        <button class="btn btn-outline" data-action="detail" data-id="${escapeHtml(scenario.id)}" aria-label="View ${escapeHtml(scenario.id)} details" title="View Details">
                             <i class="fas fa-eye"></i>
                         </button>
-                        <button class="btn btn-outline" onclick="editRow('${scenario.id}')" title="Edit">
+                        <button class="btn btn-outline" data-action="edit" data-id="${escapeHtml(scenario.id)}" aria-label="Edit ${escapeHtml(scenario.id)}" title="Edit">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn btn-outline" onclick="deleteRow('${scenario.id}')" title="Delete">
+                        <button class="btn btn-outline" data-action="delete" data-id="${escapeHtml(scenario.id)}" aria-label="Delete ${escapeHtml(scenario.id)}" title="Delete">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -1272,7 +1663,15 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
             tbody.appendChild(tr);
         });
         
-        document.getElementById('totalScenariosCount').textContent = filteredData.length;
+    }
+
+    function handleTableAction(event) {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const { action, id } = button.dataset;
+        if (action === 'detail') showDetail(id);
+        if (action === 'edit') editRow(id);
+        if (action === 'delete') deleteRow(id);
     }
 
     function updatePagination() {
@@ -1329,12 +1728,12 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
         }
         
         const statusColors = {
-            'Passed': '#28a745',
-            'Failed': '#dc3545',
-            'N/A': '#6c757d',
-            'Retest': '#ffc107',
-            'On Hold': '#6f42c1',
-            'TBC': '#17a2b8'
+            'Passed': '#198754',
+            'Failed': '#E30613',
+            'N/A': '#64748B',
+            'Retest': '#C5A86A',
+            'On Hold': '#1E3A66',
+            'TBC': '#0B1A33'
         };
         
         chartInstances.status = new Chart(statusCtx, {
@@ -1361,7 +1760,7 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
                             label: function(context) {
                                 const label = context.label;
                                 const value = context.raw;
-                                const percentage = ((value / metrics.total) * 100).toFixed(1);
+                                const percentage = metrics.total > 0 ? ((value / metrics.total) * 100).toFixed(1) : '0.0';
                                 return `${label}: ${value} (${percentage}%)`;
                             }
                         }
@@ -1424,17 +1823,26 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
 
     // Enhanced functionality
     function addManualTestCase() {
-        const id = document.getElementById('newId').value;
-        const userStory = document.getElementById('newUserStory').value;
-        const description = document.getElementById('newDescription').value;
+        const id = document.getElementById('newId').value.trim();
+        const userStory = document.getElementById('newUserStory').value.trim();
+        const description = document.getElementById('newDescription').value.trim();
         const moduleFitur = document.getElementById('newModule').value;
         const severity = document.getElementById('newSeverity').value;
         const qa = document.getElementById('newQA').value;
-        const jira = document.getElementById('newJira').value;
+        const jira = document.getElementById('newJira').value.trim();
         const company = document.getElementById('newCompany').value;
         const tipeTest = document.getElementById('newTipeTest').value;
         
-        if (id && description && qa && jira) {
+        if (!id || !description || !qa) {
+            alert('Please provide a Test Case ID, test objective, and QA owner.');
+            return;
+        }
+        if (testScenarios.some(scenario => scenario.id.toLowerCase() === id.toLowerCase())) {
+            alert(`Test Case ID ${id} already exists.`);
+            return;
+        }
+
+        {
             testScenarios.push({ 
                 id, 
                 description, 
@@ -1464,6 +1872,7 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
             renderMetricsSummary();
             renderQAPerformance();
             renderSeverityBreakdown();
+            populateQAFilter();
             
             // Clear inputs
             document.getElementById('newId').value = '';
@@ -1472,78 +1881,44 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
             document.getElementById('newJira').value = '';
             
             alert('Test case added successfully!');
-        } else {
-            alert('Please fill in all required fields.');
         }
     }
 
     function addBulkTestCases() {
         const bulkInput = document.getElementById('bulkCases').value;
-        const lines = bulkInput.trim().split('\n');
+        const rows = parseCSVRows(bulkInput);
         let addedCount = 0;
-        
-        // Check if first line contains headers
-        const firstLine = lines[0];
-        const hasHeaders = firstLine.includes('Test Case ID') && firstLine.includes('PIC QA');
-        
-        lines.forEach((line, index) => {
-            // Skip header row
-            if (index === 0 && hasHeaders) return;
-            
-            // Handle multi-line values (like dataUji with line breaks)
-            const parts = [];
-            let currentPart = '';
-            let inQuotes = false;
-            
-            for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-                if (char === '"') {
-                    inQuotes = !inQuotes;
-                } else if (char === ',' && !inQuotes) {
-                    parts.push(currentPart);
-                    currentPart = '';
-                } else {
-                    currentPart += char;
-                }
-            }
-            parts.push(currentPart);
-            
-            if (parts.length >= 17) {
-                const [
-                    testCaseId, no, userStory, moduleFitur, tipeTest, company, 
-                    divisi, role, tujuanPengujian, langkahUji, dataUji, 
-                    hasilDiharapkan, picQA, status, catatan, statusProd, severity
-                ] = parts.map(p => p.trim().replace(/^"|"$/g, ''));
-                
-                if (testCaseId && picQA) {
-                    // Convert to our internal format
-                    testScenarios.push({ 
-                        id: testCaseId,
-                        description: tujuanPengujian,
-                        severity: severity,
-                        status: status,
-                        qa: picQA,
-                        jira: testCaseId.replace('SDZ-', 'PROJ-'),
-                        lastUpdated: new Date().toISOString().split('T')[0],
-                        metadata: {
-                            no: no,
-                            userStory: userStory,
-                            moduleFitur: moduleFitur,
-                            tipeTest: tipeTest,
-                            company: company,
-                            divisi: divisi,
-                            role: role,
-                            tujuanPengujian: tujuanPengujian,
-                            langkahUji: langkahUji,
-                            dataUji: dataUji.replace(/\\n/g, '\n'),
-                            hasilDiharapkan: hasilDiharapkan,
-                            catatan: catatan,
-                            statusProd: statusProd
-                        }
-                    });
-                    addedCount++;
-                }
-            }
+        const knownIds = new Set(testScenarios.map(scenario => scenario.id.toLowerCase()));
+        const firstRow = rows[0] || [];
+        const hasHeaders = firstRow.some(value => value.trim().toLowerCase() === 'test case id');
+
+        rows.slice(hasHeaders ? 1 : 0).forEach(parts => {
+            if (parts.length < 17) return;
+            const [testCaseIdRaw, no, userStory, moduleFitur, tipeTest, company,
+                divisi, role, tujuanPengujian, langkahUji, dataUji,
+                hasilDiharapkan, picQA, statusRaw, catatan, statusProd, severityRaw] = parts.map(value => value.trim());
+            const testCaseId = testCaseIdRaw.trim();
+            const status = statuses.includes(statusRaw) ? statusRaw : 'TBC';
+            const severity = severities.includes(severityRaw) ? severityRaw : 'Medium';
+            if (!testCaseId || !picQA || !tujuanPengujian || knownIds.has(testCaseId.toLowerCase())) return;
+
+            testScenarios.push({
+                id: testCaseId,
+                description: tujuanPengujian,
+                severity,
+                status,
+                qa: picQA,
+                jira: testCaseId.replace('SDZ-', 'PROJ-'),
+                lastUpdated: new Date().toISOString().slice(0, 10),
+                metadata: {
+                    no, userStory, moduleFitur, tipeTest, company, divisi, role,
+                    tujuanPengujian, langkahUji,
+                    dataUji: dataUji.replace(/\\n/g, '\n'),
+                    hasilDiharapkan, catatan, statusProd,
+                },
+            });
+            knownIds.add(testCaseId.toLowerCase());
+            addedCount++;
         });
         
         if (addedCount > 0) {
@@ -1551,6 +1926,7 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
             renderMetricsSummary();
             renderQAPerformance();
             renderSeverityBreakdown();
+            populateQAFilter();
             alert(`Successfully added ${addedCount} test cases.`);
         } else {
             alert('No valid test cases were added. Please check the format.');
@@ -1583,128 +1959,26 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
     function showDetail(id) {
         const scenario = testScenarios.find(s => s.id === id);
         if (!scenario) return;
-        
-        const modalContent = document.getElementById('modalContent');
         const metadata = scenario.metadata || {};
-        
-        modalContent.innerHTML = `
+        const item = (label, value, className = 'detail-value') => `
+            <div class="detail-item"><div class="detail-label">${escapeHtml(label)}</div>
+            <div class="${className}">${escapeHtml(value ?? 'N/A')}</div></div>`;
+        const badgeItem = (label, badgeClass, value) => `
+            <div class="detail-item"><div class="detail-label">${escapeHtml(label)}</div>
+            <div class="detail-value"><span class="${badgeClass}">${escapeHtml(value ?? 'N/A')}</span></div></div>`;
+        const section = (title, items) => `<section class="detail-section"><h4>${escapeHtml(title)}</h4><div class="detail-grid">${items.join('')}</div></section>`;
+        const statusClass = String(scenario.status || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const severityClass = String(scenario.severity || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const jiraUrl = `https://jira.example.com/browse/${encodeURIComponent(String(scenario.jira || ''))}`;
+
+        document.getElementById('modalContent').innerHTML = `
             <div class="detail-grid">
-                <div class="detail-section">
-                    <h4>Basic Information</h4>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <div class="detail-label">Test Case ID</div>
-                            <div class="detail-value">${scenario.id}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">No</div>
-                            <div class="detail-value">${metadata.no || 'N/A'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">User Story</div>
-                            <div class="detail-value">${metadata.userStory || 'N/A'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Modul & Fitur</div>
-                            <div class="detail-value">${metadata.moduleFitur || 'N/A'}</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="detail-section">
-                    <h4>Test Details</h4>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <div class="detail-label">Tipe Test</div>
-                            <div class="detail-value">${metadata.tipeTest || 'N/A'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Company</div>
-                            <div class="detail-value">${metadata.company || 'N/A'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Divisi</div>
-                            <div class="detail-value">${metadata.divisi || 'N/A'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Role</div>
-                            <div class="detail-value">${metadata.role || 'N/A'}</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="detail-section">
-                    <h4>Test Execution</h4>
-                    <div class="detail-item">
-                        <div class="detail-label">Tujuan Pengujian</div>
-                        <div class="detail-value">${scenario.description}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Langkah Uji</div>
-                        <div class="test-steps">${metadata.langkahUji || 'N/A'}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Data Uji</div>
-                        <div class="test-steps">${metadata.dataUji || 'N/A'}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Hasil yang Diharapkan</div>
-                        <div class="detail-value">${metadata.hasilDiharapkan || 'N/A'}</div>
-                    </div>
-                </div>
-                
-                <div class="detail-section">
-                    <h4>Status & Assignment</h4>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <div class="detail-label">PIC QA</div>
-                            <div class="detail-value">${scenario.qa}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Status</div>
-                            <div class="detail-value">
-                                <span class="status-badge status-${scenario.status.toLowerCase().replace(/\s/g, '')}">
-                                    ${scenario.status}
-                                </span>
-                            </div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Severity</div>
-                            <div class="detail-value">
-                                <span class="severity-badge severity-${scenario.severity.toLowerCase()}">
-                                    ${scenario.severity}
-                                </span>
-                            </div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Status Test Production</div>
-                            <div class="detail-value">${metadata.statusProd || 'N/A'}</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="detail-section">
-                    <h4>Additional Information</h4>
-                    <div class="detail-item">
-                        <div class="detail-label">Jira Ticket</div>
-                        <div class="detail-value">
-                            <a href="https://jira.example.com/browse/${scenario.jira}" target="_blank" class="jira-link">
-                                <i class="fab fa-jira"></i> ${scenario.jira}
-                            </a>
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Catatan</div>
-                        <div class="detail-value">${metadata.catatan || 'No notes'}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Last Updated</div>
-                        <div class="detail-value">${scenario.lastUpdated}</div>
-                    </div>
-                </div>
-            </div>
-        `;
-        
+                ${section('Basic Information', [item('Test Case ID', scenario.id), item('No', metadata.no), item('User Story', metadata.userStory), item('Modul & Fitur', metadata.moduleFitur)])}
+                ${section('Test Details', [item('Tipe Test', metadata.tipeTest), item('Company', metadata.company), item('Divisi', metadata.divisi), item('Role', metadata.role)])}
+                ${section('Test Execution', [item('Tujuan Pengujian', scenario.description), item('Langkah Uji', metadata.langkahUji, 'test-steps'), item('Data Uji', metadata.dataUji, 'test-steps'), item('Hasil yang Diharapkan', metadata.hasilDiharapkan)])}
+                ${section('Status & Assignment', [item('PIC QA', scenario.qa), badgeItem('Status', `status-badge status-${statusClass}`, scenario.status), badgeItem('Severity', `severity-badge severity-${severityClass}`, scenario.severity), item('Status Test Production', metadata.statusProd)])}
+                ${section('Additional Information', [item('Jira Ticket', `<a href="${escapeHtml(jiraUrl)}" target="_blank" rel="noopener noreferrer" class="jira-link">${escapeHtml(scenario.jira)}</a>`), item('Catatan', metadata.catatan || 'No notes'), item('Last Updated', scenario.lastUpdated)])}
+            </div>`;
         document.getElementById('detailModal').style.display = 'flex';
     }
 
@@ -1713,10 +1987,55 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
     }
 
     function editRow(id) {
-        // In a real application, you would open an edit form
-        alert(`Edit functionality for ${id} would open an edit form.`);
-        // For now, we'll just show the detail modal
-        showDetail(id);
+        const scenario = testScenarios.find(item => item.id === id);
+        if (!scenario) return;
+        document.getElementById('modalContent').innerHTML = `
+            <form id="editTestCaseForm" data-id="${escapeHtml(scenario.id)}">
+                <div class="form-row">
+                    <div class="form-group"><label>Test Case ID</label><input value="${escapeHtml(scenario.id)}" disabled></div>
+                    <div class="form-group"><label for="editStory">User Story</label><input id="editStory" name="userStory" value="${escapeHtml(scenario.metadata?.userStory || '')}"></div>
+                </div>
+                <div class="form-group"><label for="editDescription">Tujuan Pengujian</label><input id="editDescription" name="description" value="${escapeHtml(scenario.description)}" required></div>
+                <div class="form-row">
+                    <div class="form-group"><label for="editSeverity">Severity</label><select id="editSeverity" name="severity">${severities.map(value => `<option ${value === scenario.severity ? 'selected' : ''}>${value}</option>`).join('')}</select></div>
+                    <div class="form-group"><label for="editStatus">Status</label><select id="editStatus" name="status">${statuses.map(value => `<option ${value === scenario.status ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label for="editQA">PIC QA</label><input id="editQA" name="qa" value="${escapeHtml(scenario.qa)}" required></div>
+                    <div class="form-group"><label for="editJira">Jira Ticket</label><input id="editJira" name="jira" value="${escapeHtml(scenario.jira || '')}"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label for="editModule">Modul & Fitur</label><input id="editModule" name="moduleFitur" value="${escapeHtml(scenario.metadata?.moduleFitur || '')}"></div>
+                    <div class="form-group"><label for="editTestType">Tipe Test</label><input id="editTestType" name="tipeTest" value="${escapeHtml(scenario.metadata?.tipeTest || '')}"></div>
+                </div>
+                <div class="export-actions">
+                    <button class="btn btn-primary" type="submit">Save Changes</button>
+                    <button class="btn btn-outline" type="button" onclick="closeDetailModal()">Cancel</button>
+                </div>
+            </form>`;
+        document.getElementById('editTestCaseForm').addEventListener('submit', saveEditedRow);
+        document.getElementById('detailModal').style.display = 'flex';
+        document.getElementById('editDescription').focus();
+    }
+
+    function saveEditedRow(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const scenario = testScenarios.find(item => item.id === form.dataset.id);
+        if (!scenario) return closeDetailModal();
+        const values = new FormData(form);
+        scenario.description = String(values.get('description') || '').trim();
+        scenario.severity = String(values.get('severity') || scenario.severity);
+        scenario.status = String(values.get('status') || scenario.status);
+        scenario.qa = String(values.get('qa') || '').trim();
+        scenario.jira = String(values.get('jira') || '').trim();
+        scenario.lastUpdated = new Date().toISOString().slice(0, 10);
+        scenario.metadata = { ...scenario.metadata, userStory: String(values.get('userStory') || '').trim(), moduleFitur: String(values.get('moduleFitur') || '').trim(), tipeTest: String(values.get('tipeTest') || '').trim() };
+        closeDetailModal();
+        renderTable();
+        renderMetricsSummary();
+        renderQAPerformance();
+        renderSeverityBreakdown();
     }
 
     function deleteRow(id) {
@@ -1730,25 +2049,7 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
     }
 
     function filterTable() {
-        const statusFilter = document.getElementById('filterStatus').value;
-        const severityFilter = document.getElementById('filterSeverity').value;
-        const qaFilter = document.getElementById('filterQA').value;
-        const searchText = document.getElementById('searchInput').value.toLowerCase();
-        
-        filteredData = testScenarios.filter(scenario => {
-            const matchesStatus = !statusFilter || scenario.status === statusFilter;
-            const matchesSeverity = !severityFilter || scenario.severity === severityFilter;
-            const matchesQA = !qaFilter || scenario.qa === qaFilter;
-            const matchesSearch = !searchText || 
-                scenario.id.toLowerCase().includes(searchText) ||
-                scenario.description.toLowerCase().includes(searchText) ||
-                scenario.qa.toLowerCase().includes(searchText) ||
-                scenario.jira.toLowerCase().includes(searchText) ||
-                (scenario.metadata?.userStory && scenario.metadata.userStory.toLowerCase().includes(searchText));
-            
-            return matchesStatus && matchesSeverity && matchesQA && matchesSearch;
-        });
-        
+        filteredData = getFilteredScenarios();
         currentPage = 1;
         renderTablePage();
         updatePagination();
@@ -1763,6 +2064,8 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
         document.getElementById('filterSeverity').value = '';
         document.getElementById('filterQA').value = '';
         document.getElementById('searchInput').value = '';
+        document.getElementById('startDate').value = '';
+        document.getElementById('endDate').value = '';
         renderTable();
     }
 
@@ -1779,10 +2082,12 @@ SDZ-001,1,Auth,dashboard,P,sprint,development and testing,clientWhatsapp,Memasti
     function applyDateFilter() {
         const startDate = document.getElementById('startDate').value;
         const endDate = document.getElementById('endDate').value;
-        
-        // Filter logic based on dates
-        alert(`Filter applied for dates: ${startDate} to ${endDate}`);
-        // Implement actual date filtering here
+        if (startDate && endDate && startDate > endDate) {
+            alert('Start date must be on or before end date.');
+            return;
+        }
+        currentPage = 1;
+        filterTable();
     }
 
     function exportToCSV() {
